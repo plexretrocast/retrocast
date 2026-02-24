@@ -1654,7 +1654,7 @@ function getMarathonShowPool(ch){
   }
   if(ch.labels&&ch.labels.length)   episodes=episodes.filter(e=>(e._labels||[]).some(l=>ch.labels.includes(l)));
   if(ch.maxRating)  episodes=episodes.filter(e=>ratingAllowed(e.contentRating||e._showRating||'',ch.maxRating,'tv'));
-  if(ch.genres&&ch.genres.length)   episodes=episodes.filter(e=>ch.genres.some(g=>(e._showGenres||[]).includes(g)));
+  if(ch.genres&&ch.genres.length)   episodes=episodes.filter(e=>ch.genres.some(g=>genreMatch(g, e._showGenres||[])));
   if(ch.decade){ const d=parseInt(ch.decade); episodes=episodes.filter(e=>(e._showYear||e.year||0)>=d&&(e._showYear||e.year||0)<d+10); }
   if(ch.minRating){ const r=parseFloat(ch.minRating); episodes=episodes.filter(e=>(e._showRating||0)>=r); }
 
@@ -1686,7 +1686,7 @@ async function getMarathonMovieList(ch){
   // Fallback: filtered library
   let items=[...S.allMovies].filter(m=>!m._isComm);
   if(ch.libKeys&&ch.libKeys.length) items=items.filter(m=>ch.libKeys.includes(m._libKey));
-  if(ch.genres&&ch.genres.length)   items=items.filter(m=>{const g=(m.Genre||[]).map(x=>x.tag);return ch.genres.some(cg=>g.includes(cg));});
+  if(ch.genres&&ch.genres.length)   items=items.filter(m=>{const g=(m.Genre||[]).map(x=>x.tag);return ch.genres.some(cg=>genreMatch(cg, g));});
   if(ch.decade){const d=parseInt(ch.decade);items=items.filter(m=>m.year>=d&&m.year<d+10);}
   if(ch.maxRating) items=items.filter(m=>ratingAllowed(m.contentRating||'',ch.maxRating,'movie'));
   // Sort by year ascending (oldest first) for natural marathon order
@@ -1737,7 +1737,7 @@ function buildPlaylist(ch){
     let items=[...S.allMovies].filter(m=>!m._isComm); // exclude commercials from movie channels
     if(ch.libKeys&&ch.libKeys.length) items=items.filter(m=>ch.libKeys.includes(m._libKey));
     if(ch.labels&&ch.labels.length)   items=items.filter(m=>(m._labels||[]).some(l=>ch.labels.includes(l)));
-    if(ch.genres&&ch.genres.length)   items=items.filter(m=>{const g=(m.Genre||[]).map(x=>x.tag);return ch.genres.some(cg=>g.includes(cg));});
+    if(ch.genres&&ch.genres.length)   items=items.filter(m=>{const g=(m.Genre||[]).map(x=>x.tag);return ch.genres.some(cg=>genreMatch(cg, g));});
     if(ch.decade){const d=parseInt(ch.decade);items=items.filter(m=>m.year>=d&&m.year<d+10);}
     if(ch.minRating){const r=parseFloat(ch.minRating);items=items.filter(m=>(m.audienceRating||m.rating||0)>=r);}
     if(ch.maxRating) items=items.filter(m=>ratingAllowed(m.contentRating||'',ch.maxRating,'movie'));
@@ -1762,7 +1762,7 @@ function buildPlaylist(ch){
     }
     if(ch.labels&&ch.labels.length)   episodes=episodes.filter(e=>(e._labels||[]).some(l=>ch.labels.includes(l)));
     if(ch.maxRating) episodes=episodes.filter(e=>ratingAllowed(e.contentRating||e._showRating||'',ch.maxRating,'tv'));
-    if(ch.genres&&ch.genres.length)   episodes=episodes.filter(e=>ch.genres.some(g=>(e._showGenres||[]).includes(g)));
+    if(ch.genres&&ch.genres.length)   episodes=episodes.filter(e=>ch.genres.some(g=>genreMatch(g, e._showGenres||[])));
     if(ch.decade){ const d=parseInt(ch.decade); episodes=episodes.filter(e=>{ const y=e._showYear||e.year||0; return y>=d&&y<d+10; }); }
     if(ch.minRating){ const r=parseFloat(ch.minRating); episodes=episodes.filter(e=>(e._showRating||0)>=r); }
 
@@ -1821,6 +1821,25 @@ function getWeekStart(weekOffset){ return getMondayOf(weekOffset); }
 function getManagedWeekOffsets(){ return [0,1]; }
 
 // ── Build a single channel's schedule for one week ────────────────────────────
+// ── Genre matching — handles Plex naming variants ────────────────────────────
+// Normalises both sides to lowercase and maps known aliases so that e.g.
+// "Sci-Fi" in the channel form matches "Science Fiction" in Plex and vice versa.
+const GENRE_ALIASES = {
+  'sci-fi':           ['science fiction', 'sci fi', 'sci-fi'],
+  'science fiction':  ['science fiction', 'sci fi', 'sci-fi'],
+  'sci fi':           ['science fiction', 'sci fi', 'sci-fi'],
+};
+
+function normaliseGenre(g) {
+  return (g || '').toLowerCase().trim();
+}
+
+function genreMatch(channelGenre, plexGenres) {
+  const cg = normaliseGenre(channelGenre);
+  const aliases = GENRE_ALIASES[cg] || [cg];
+  return plexGenres.some(pg => aliases.includes(normaliseGenre(pg)));
+}
+
 function buildChannelWeek(ch, weekStartMs){
   // Marathon channels have their own build logic
   if(ch.type==='marathon-tv')   return buildMarathonTVWeek(ch, weekStartMs);
@@ -2098,7 +2117,7 @@ function buildMarathonMovieWeek(ch, weekStartMs){
     // Fallback: filtered library sorted by year
     items=[...S.allMovies].filter(m=>!m._isComm);
     if(ch.libKeys&&ch.libKeys.length) items=items.filter(m=>ch.libKeys.includes(m._libKey));
-    if(ch.genres&&ch.genres.length)   items=items.filter(m=>{const g=(m.Genre||[]).map(x=>x.tag);return ch.genres.some(cg=>g.includes(cg));});
+    if(ch.genres&&ch.genres.length)   items=items.filter(m=>{const g=(m.Genre||[]).map(x=>x.tag);return ch.genres.some(cg=>genreMatch(cg, g));});
     if(ch.decade){const d=parseInt(ch.decade);items=items.filter(m=>m.year>=d&&m.year<d+10);}
     if(ch.maxRating) items=items.filter(m=>ratingAllowed(m.contentRating||'',ch.maxRating,'movie'));
     items.sort((a,b)=>(a.year||0)-(b.year||0));
