@@ -1,16 +1,11 @@
-FROM nvidia/cuda:12.3.1-runtime-ubuntu22.04
+FROM node:20-slim
 
 LABEL org.opencontainers.image.title="RetroCast"
 LABEL org.opencontainers.image.description="Retro TV Guide for Plex — HLS streaming server"
 LABEL org.opencontainers.image.source="https://github.com/plexretrocast/retrocast"
 
-# Install Node.js 20 + ffmpeg
 RUN apt-get update \
- && apt-get install -y --no-install-recommends \
-      curl \
-      ffmpeg \
- && curl -fsSL https://deb.nodesource.com/setup_20.x | bash - \
- && apt-get install -y --no-install-recommends nodejs \
+ && apt-get install -y --no-install-recommends ffmpeg \
  && rm -rf /var/lib/apt/lists/*
 
 WORKDIR /app
@@ -28,9 +23,7 @@ EXPOSE 3000
 ENV NODE_ENV=production \
     PORT=3000 \
     DATA_FILE=/data/retrocast-data.json \
-    ENCODER=auto \
-    NVIDIA_VISIBLE_DEVICES=all \
-    NVIDIA_DRIVER_CAPABILITIES=video,compute,utility
+    ENCODER=auto
 
 STOPSIGNAL SIGTERM
 
