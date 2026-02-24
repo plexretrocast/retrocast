@@ -37,11 +37,17 @@ app.post  ('/api/guide',    (req,res) => { const d=load(); d.guide=req.body.guid
 app.delete('/api/state',    (req,res) => { save({config:{},channels:[],guide:{}}); res.json({ok:true}); });
 
 // ── FFmpeg check + GPU detection ─────────────────────────────────────────────
-let ffmpegAvailable = false;
-let videoEncoder = 'libx264'; // fallback CPU encoder
-let encoderType = 'cpu';
+// Set ENCODER env var to choose encoder:
+//   auto   → test in order: nvidia → amd → intel → cpu  (default)
+//   nvidia → force NVIDIA NVENC  (skips test — needed for Docker/WSL2)
+//   intel  → force Intel QSV
+//   amd    → force AMD AMF
+//   cpu    → force software x264
 
-// ENCODER env var: auto | nvidia | intel | amd | cpu  (default: auto)
+let ffmpegAvailable = false;
+let videoEncoder = 'libx264'; // fallback
+let encoderType  = 'CPU (software)';
+
 const ENCODER_PREF = (process.env.ENCODER || 'auto').toLowerCase();
 
 const ALL_ENCODERS = [
@@ -55,22 +61,35 @@ try {
   execSync('ffmpeg -version', { stdio: 'ignore' });
   ffmpegAvailable = true;
 
-  const toTry = ENCODER_PREF === 'auto'
-    ? ALL_ENCODERS
-    : ALL_ENCODERS.filter(e => e.key === ENCODER_PREF)
-        .concat(ALL_ENCODERS.filter(e => e.key === 'cpu'));
-
-  for (const g of toTry) {
-    try {
-      execSync(`ffmpeg -hide_banner -loglevel error ${g.test}`, { stdio: 'ignore' });
-      videoEncoder = g.enc;
-      encoderType  = g.type;
-      break;
-    } catch(e) {}
+  if (ENCODER_PREF !== 'auto') {
+    // Forced encoder — trust the env var and skip the startup test.
+    // The test can fail in some container runtimes (e.g. NVIDIA on Windows/WSL2)
+    // even when the encoder works perfectly fine at transcode time.
+    const forced = ALL_ENCODERS.find(e => e.key === ENCODER_PREF);
+    if (forced) {
+      videoEncoder = forced.enc;
+      encoderType  = forced.type;
+    } else {
+      console.warn(`Unknown ENCODER value "${ENCODER_PREF}" — falling back to CPU`);
+    }
+  } else {
+    // Auto mode — test each encoder in order, use first that works
+    for (const g of ALL_ENCODERS) {
+      try {
+        execSync(`ffmpeg -hide_banner -loglevel error ${g.test}`, { stdio: 'ignore' });
+        videoEncoder = g.enc;
+        encoderType  = g.type;
+        break;
+      } catch(e) {}
+    }
   }
 } catch(e) {}
 
-console.log(`Encoder: ${ffmpegAvailable ? `${encoderType} (${videoEncoder})` : 'ffmpeg NOT FOUND'}`);
+if (!ffmpegAvailable) {
+  console.log('Encoder: ffmpeg NOT FOUND — transcoding disabled');
+} else {
+  console.log(`Encoder: ${encoderType} (${videoEncoder})${ENCODER_PREF !== 'auto' ? ' — forced, skipping startup test' : ' — auto-detected'}`);
+}
 console.log(`Encoder mode: ${ENCODER_PREF === 'auto' ? 'auto-detect' : `forced → ${ENCODER_PREF}`}`);
 app.get('/api/ffmpeg-available', (req,res) => res.json({available: ffmpegAvailable}));
 
@@ -119,7 +138,7 @@ app.get('/api/stream', (req, res) => {
   // Normalize VFR to CFR — prevents freezes with AVI/older containers
   args.push('-vf', 'fps=fps=24000/1001');
 
-  // Build encoder args based on detected GPU/CPU
+  // Build encoder args based on selected GPU/CPU
   const encArgs = videoEncoder === 'h264_nvenc' ? [
     '-c:v', 'h264_nvenc', '-preset', 'p1', '-rc', 'vbr',
     '-cq', '23', '-profile:v', 'high', '-level', '5.1',
