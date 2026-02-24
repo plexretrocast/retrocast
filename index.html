@@ -610,6 +610,7 @@ body[data-theme="red"] {
     </div>
     <div id="fs-live-badge">● LIVE</div>
     <button id="sound-btn" onclick="toggleSound()">🔇 OFF</button>
+    <button id="fs-scan-btn" onclick="toggleScanlines()" title="Toggle Scanlines">▦ SCAN</button>
     <div id="fs-clock-display"></div>
   </div>
   <button id="fs-ch-prev" onclick="channelStep(-1)">&#9650;</button>
@@ -1395,6 +1396,8 @@ document.addEventListener('DOMContentLoaded', () => {
   const scanlinesOff = localStorage.getItem('retrocast-scanlines') === 'off';
   const btn = document.getElementById('btn-scanlines');
   if(btn) btn.classList.toggle('active', !scanlinesOff);
+  const fsBtn = document.getElementById('fs-scan-btn');
+  if(fsBtn) fsBtn.classList.toggle('active', !scanlinesOff);
 });
 
 function setConnected(v){
@@ -2509,6 +2512,11 @@ async function handleClickToPlay(){
 }
 
 function exitPlayer(){
+  // Stop the ffmpeg transcode process on the server immediately
+  if(S.currentStreamId){
+    fetch('/api/stream/stop',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({id:S.currentStreamId})}).catch(()=>{});
+    S.currentStreamId=null;
+  }
   if(S.hlsSessionId){
     fetch('/api/hls/'+S.hlsSessionId, {method:'DELETE'}).catch(()=>{});
     S.hlsSessionId=null;
@@ -3118,6 +3126,9 @@ function toggleScanlines(){
   const off = document.body.classList.toggle('no-scanlines');
   localStorage.setItem('retrocast-scanlines', off ? 'off' : 'on');
   document.getElementById('btn-scanlines').classList.toggle('active', !off);
+  // Keep fullscreen SCAN button in sync
+  const fsBtn = document.getElementById('fs-scan-btn');
+  if(fsBtn) fsBtn.classList.toggle('active', !off);
 }
 
 async function persistFavorites(){
