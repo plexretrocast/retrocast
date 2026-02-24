@@ -1,0 +1,94 @@
+version: "3.9"
+
+# ╔══════════════════════════════════════════════════════════════════╗
+# ║                         RETROCAST                               ║
+# ║              Retro TV Guide for Plex — Docker                   ║
+# ╠══════════════════════════════════════════════════════════════════╣
+# ║  QUICK START — no GPU (CPU transcoding):                        ║
+# ║    docker compose up -d                                         ║
+# ║    Open: http://localhost:3000                                  ║
+# ╠══════════════════════════════════════════════════════════════════╣
+# ║  GPU SETUP:                                                     ║
+# ║  1. Set ENCODER below to: nvidia | intel | amd | cpu | auto     ║
+# ║  2. Uncomment the matching GPU block for your hardware           ║
+# ╚══════════════════════════════════════════════════════════════════╝
+
+services:
+  retrocast:
+    image: ghcr.io/plexretrocast/retrocast:latest
+    # To build locally from source instead of pulling:
+    # build: .
+    container_name: retrocast
+    restart: unless-stopped
+
+    ports:
+      - "3000:3000"
+
+    volumes:
+      # All channel configs, schedules and Plex credentials persist here
+      - retrocast-data:/data
+
+    environment:
+      PORT: 3000
+      DATA_FILE: /data/retrocast-data.json
+      NODE_ENV: production
+
+      # ── GPU encoder selection ──────────────────────────────────────
+      # auto   → detects best available (nvidia → amd → intel → cpu)
+      # nvidia → NVIDIA NVENC  (uncomment NVIDIA block below)
+      # intel  → Intel QSV     (uncomment Intel block below)
+      # amd    → AMD AMF       (uncomment AMD block below)
+      # cpu    → software x264 (no GPU block needed, works everywhere)
+      ENCODER: auto
+
+    # ──────────────────────────────────────────────────────────────────
+    # NVIDIA — Windows (Docker Desktop) / Linux
+    # ──────────────────────────────────────────────────────────────────
+    # Windows:  Install Docker Desktop + standard NVIDIA game drivers.
+    #           No extra toolkit needed — Docker Desktop handles it.
+    #
+    # Linux:    Install nvidia-container-toolkit first:
+    #           https://docs.nvidia.com/datacenter/cloud-native/container-toolkit/install-guide.html
+    #
+    # Then set ENCODER: nvidia above and uncomment this block:
+    #
+    # deploy:
+    #   resources:
+    #     reservations:
+    #       devices:
+    #         - driver: nvidia
+    #           count: 1
+    #           capabilities: [gpu]
+
+    # ──────────────────────────────────────────────────────────────────
+    # Intel QSV / Arc  (Linux only)
+    # ──────────────────────────────────────────────────────────────────
+    # Host setup (once):
+    #   sudo apt install intel-media-va-driver-non-free
+    #   sudo usermod -aG render,video $USER   ← then log out/in
+    #
+    # Then set ENCODER: intel above and uncomment this block:
+    #
+    # devices:
+    #   - /dev/dri:/dev/dri
+
+    # ──────────────────────────────────────────────────────────────────
+    # AMD  (Linux only)
+    # ──────────────────────────────────────────────────────────────────
+    # Host setup (once):
+    #   sudo usermod -aG render,video $USER   ← then log out/in
+    #
+    # Then set ENCODER: amd above and uncomment this block:
+    #
+    # devices:
+    #   - /dev/dri:/dev/dri
+
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "3"
+
+volumes:
+  retrocast-data:
+    driver: local

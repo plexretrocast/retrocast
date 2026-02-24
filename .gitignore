@@ -1,0 +1,3 @@
+node_modules/
+retrocast-data.json
+*.log

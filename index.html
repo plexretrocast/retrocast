@@ -1,0 +1,3254 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<!-- build:2026-02-22-v5 -->
+<title>RetroCast — Retro TV Guide</title>
+<link href="https://fonts.googleapis.com/css2?family=VT323&family=Share+Tech+Mono&family=Oswald:wght@400;700&display=swap" rel="stylesheet">
+<script src="https://cdn.jsdelivr.net/npm/hls.js@1.5.13/dist/hls.min.js"></script>
+<script>
+// ── Theme System ──────────────────────────────────────────────────────────────
+function setTheme(theme){
+  document.body.dataset.theme = theme;
+  localStorage.setItem('retrocast-theme', theme);
+  document.querySelectorAll('.theme-option').forEach(el => {
+    el.classList.toggle('active', el.dataset.theme === theme);
+  });
+  const p = document.getElementById('theme-popup');
+  if(p) p.style.display = 'none';
+}
+function toggleThemePopup(){
+  const p = document.getElementById('theme-popup');
+  if(!p) return;
+  p.style.display = p.style.display === 'block' ? 'none' : 'block';
+}
+document.addEventListener('click', e => {
+  const p = document.getElementById('theme-popup');
+  if(p && p.style.display === 'block' &&
+     !p.contains(e.target) && e.target.id !== 'btn-theme'){
+    p.style.display = 'none';
+  }
+});
+(function(){
+  const saved = localStorage.getItem('retrocast-theme') || '';
+  if(saved){ document.body.dataset.theme = saved; }
+})();
+</script>
+<style>
+:root {
+  --bg:#0a0a0f; --surface:#0f0f1a; --border:#1a1a3a; --border-bright:#2a2a5a;
+  --amber:#ffb000; --amber-dim:#7a5500; --amber-glow:rgba(255,176,0,0.15);
+  --cyan:#00e5ff; --cyan-dim:#005a65; --cyan-glow:rgba(0,229,255,0.1);
+  --green:#00ff88; --red:#ff3355;
+  --text:#d0d0e8; --text-dim:#6060a0; --text-bright:#fff;
+  --scanline:rgba(0,0,0,0.28);
+  --channel-h:80px; --slot-w:200px; --header-h:60px; --guide-header-h:50px;
+}
+*{box-sizing:border-box;margin:0;padding:0;}
+body{background:var(--bg);color:var(--text);font-family:'Share Tech Mono',monospace;overflow:hidden;height:100vh;width:100vw;user-select:none;}
+body::before{content:'';position:fixed;inset:0;background:repeating-linear-gradient(0deg,var(--scanline) 0px,var(--scanline) 1px,transparent 1px,transparent 3px);pointer-events:none;z-index:9999;animation:scanflicker 8s infinite;}
+body.no-scanlines::before{display:none!important;}
+body::after{content:'';position:fixed;inset:0;background:radial-gradient(ellipse at center,transparent 60%,rgba(0,0,0,0.75) 100%);pointer-events:none;z-index:9998;}
+@keyframes scanflicker{0%,95%,100%{opacity:1}96%{opacity:.85}97%{opacity:1}98%{opacity:.9}}
+@keyframes blink{0%,100%{opacity:1}50%{opacity:.25}}
+@keyframes pulse{0%,100%{opacity:1}50%{opacity:.5}}
+@keyframes static-anim{0%{background-position:0 0}100%{background-position:100px 50px}}
+
+/* ── LAYOUT ── */
+#app{display:flex;flex-direction:column;height:100vh;}
+
+/* ── TOPBAR ── */
+#topbar{height:var(--header-h);background:linear-gradient(135deg,#0a0a20,#0f0f30,#0a0a20);border-bottom:2px solid var(--amber);display:flex;align-items:center;padding:0 18px;gap:14px;flex-shrink:0;box-shadow:0 0 30px rgba(255,176,0,.3),0 2px 0 rgba(255,176,0,.5);}
+#logo{font-family:'VT323',monospace;font-size:32px;color:var(--amber);text-shadow:0 0 20px var(--amber),0 0 40px rgba(255,176,0,.5);letter-spacing:4px;white-space:nowrap;}
+#logo span{color:var(--cyan);text-shadow:0 0 20px var(--cyan);}
+#clock{font-family:'VT323',monospace;font-size:28px;color:var(--green);text-shadow:0 0 15px var(--green);margin-left:auto;letter-spacing:2px;}
+#date-display{font-size:11px;color:var(--text-dim);letter-spacing:1px;}
+.topbar-btn{background:transparent;border:1px solid var(--border-bright);color:var(--text);font-family:'Share Tech Mono',monospace;font-size:11px;padding:6px 12px;cursor:pointer;letter-spacing:1px;transition:all .2s;text-transform:uppercase;white-space:nowrap;}
+.topbar-btn:hover{border-color:var(--amber);color:var(--amber);box-shadow:0 0 10px var(--amber-glow);background:var(--amber-glow);}
+#sound-btn{background:rgba(255,51,85,.15);border:1px solid var(--red);color:var(--red);font-family:'Share Tech Mono',monospace;font-size:12px;padding:6px 14px;cursor:pointer;letter-spacing:2px;transition:all .2s;white-space:nowrap;text-transform:uppercase;}
+#sound-btn.unmuted{background:rgba(0,255,136,.12);border-color:var(--green);color:var(--green);}
+#sound-btn:hover{filter:brightness(1.3);}
+
+/* ── CONNECTION BAR ── */
+#connection-bar{background:#050510;border-bottom:1px solid var(--border);padding:7px 18px;display:flex;align-items:center;gap:12px;flex-shrink:0;font-size:11px;}
+#conn-status{display:flex;align-items:center;gap:6px;margin-left:auto;}
+#conn-dot{width:8px;height:8px;border-radius:50%;background:var(--red);box-shadow:0 0 6px var(--red);animation:blink 2s infinite;}
+#conn-dot.connected{background:var(--green);box-shadow:0 0 6px var(--green);animation:none;}
+
+/* ── MAIN ── */
+#main{display:flex;flex:1;overflow:hidden;}
+
+/* ── GUIDE ── */
+#guide-panel{flex:1;display:flex;flex-direction:column;overflow:hidden;}
+#guide-time-header{height:var(--guide-header-h);display:flex;background:#080818;border-bottom:1px solid var(--border-bright);flex-shrink:0;}
+#channel-label-col{width:160px;flex-shrink:0;border-right:2px solid var(--amber);display:flex;align-items:center;justify-content:center;font-size:10px;color:var(--amber);letter-spacing:2px;text-transform:uppercase;background:#050510;}
+#time-slots-header{flex:1;overflow:hidden;position:relative;}
+#time-slots-inner{display:flex;position:absolute;left:0;top:0;height:100%;}
+.time-slot-label{width:var(--slot-w);flex-shrink:0;display:flex;align-items:center;padding-left:12px;font-family:'VT323',monospace;font-size:22px;color:var(--amber);border-right:1px solid var(--border);text-shadow:0 0 8px rgba(255,176,0,.5);}
+#guide-body{flex:1;overflow:hidden;position:relative;}
+#guide-scroll-container{position:absolute;inset:0;overflow-y:auto;overflow-x:hidden;}
+#guide-scroll-container::-webkit-scrollbar{width:5px;}
+#guide-scroll-container::-webkit-scrollbar-track{background:#05050f;}
+#guide-scroll-container::-webkit-scrollbar-thumb{background:var(--amber-dim);}
+#guide-grid{display:flex;flex-direction:column;min-width:100%;}
+.guide-row{display:flex;height:var(--channel-h);border-bottom:1px solid var(--border);flex-shrink:0;}
+.channel-label{width:160px;flex-shrink:0;border-right:2px solid var(--amber);display:flex;flex-direction:column;justify-content:center;padding:8px 12px;background:#060614;cursor:pointer;position:sticky;left:0;z-index:10;transition:background .15s;}
+.channel-label:hover{background:#0a0a20;}
+.channel-num{font-family:'VT323',monospace;font-size:32px;color:#ffcc00;text-shadow:0 0 10px rgba(255,204,0,.9);line-height:1;}
+.channel-name{font-size:13px;color:rgba(255,255,255,0.85);letter-spacing:1px;text-transform:uppercase;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;margin-top:2px;}
+.channel-genre{font-size:11px;color:rgba(255,255,255,0.65);letter-spacing:.5px;margin-top:1px;}
+.programs-row{flex:1;position:relative;overflow:hidden;}
+.programs-inner{display:block;position:relative;height:100%;}
+.program-cell{position:absolute;top:0;height:100%;border-right:1px solid var(--border);display:flex;flex-direction:column;justify-content:center;padding:8px 12px;cursor:pointer;overflow:hidden;transition:border-color .15s,box-shadow .15s;}
+.program-cell:hover{border-color:var(--amber);box-shadow:inset 0 0 20px rgba(255,176,0,.07);}
+.program-cell.now-playing{background:linear-gradient(135deg,rgba(0,229,255,.08),rgba(0,229,255,.03));border-color:var(--cyan)!important;box-shadow:inset 0 0 20px rgba(0,229,255,.1);}
+.program-cell.past{opacity:.35;}
+.prog-time{font-size:11px;color:rgba(255,255,255,0.8);letter-spacing:1px;margin-bottom:3px;}
+.prog-title{font-family:'Oswald',sans-serif;font-size:16px;color:#ffffff;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;letter-spacing:.5px;}
+.prog-info{font-size:11px;color:rgba(255,255,255,0.6);margin-top:2px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;}
+.now-badge{position:absolute;top:5px;right:5px;background:var(--red);color:#fff;font-size:8px;padding:2px 5px;letter-spacing:1px;animation:blink 1s infinite;}
+.program-cell.commercial-cell{background:repeating-linear-gradient(45deg,rgba(255,176,0,.03),rgba(255,176,0,.03) 4px,transparent 4px,transparent 12px);border-color:var(--amber-dim)!important;opacity:.7;}
+.program-cell.commercial-cell:hover{opacity:1;}
+.prog-progress{position:absolute;bottom:0;left:0;height:3px;background:linear-gradient(90deg,var(--cyan),var(--amber));box-shadow:0 0 6px var(--cyan);pointer-events:none;}
+#time-needle{position:absolute;top:0;bottom:0;width:2px;background:var(--red);box-shadow:0 0 8px var(--red),0 0 20px rgba(255,51,85,.5);z-index:20;pointer-events:none;}
+#time-needle::before{content:'';position:absolute;top:0;left:-4px;border-left:5px solid transparent;border-right:5px solid transparent;border-top:8px solid var(--red);}
+#time-controls{display:flex;gap:6px;align-items:center;}
+#time-controls button{background:transparent;border:1px solid var(--border-bright);color:var(--amber);font-family:'VT323',monospace;font-size:18px;width:30px;height:26px;cursor:pointer;display:flex;align-items:center;justify-content:center;transition:all .2s;}
+#time-controls button:hover{border-color:var(--amber);background:var(--amber-glow);}
+#time-window-label{font-size:10px;color:var(--amber-dim);min-width:55px;text-align:center;}
+
+/* ── MODALS ── */
+.modal-overlay{position:fixed;inset:0;background:rgba(0,0,0,.88);z-index:1000;display:flex;align-items:center;justify-content:center;backdrop-filter:blur(4px);}
+.modal-overlay.hidden{display:none;}
+.modal{background:var(--surface);border:1px solid var(--border-bright);border-top:3px solid var(--amber);width:720px;max-width:96vw;max-height:88vh;display:flex;flex-direction:column;box-shadow:0 0 60px rgba(255,176,0,.2);}
+.modal-header{padding:14px 20px;border-bottom:1px solid var(--border);display:flex;align-items:center;gap:12px;}
+.modal-header h2{font-family:'VT323',monospace;font-size:24px;color:var(--amber);text-shadow:0 0 10px var(--amber);letter-spacing:3px;flex:1;}
+.modal-body{flex:1;overflow-y:auto;padding:20px;display:flex;flex-direction:column;gap:14px;}
+.modal-body::-webkit-scrollbar{width:4px;}
+.modal-body::-webkit-scrollbar-thumb{background:var(--amber-dim);}
+.modal-footer{padding:12px 20px;border-top:1px solid var(--border);display:flex;gap:10px;justify-content:flex-end;flex-wrap:wrap;}
+.form-row{display:flex;flex-direction:column;gap:5px;}
+.form-row label{font-size:10px;color:var(--amber);letter-spacing:2px;text-transform:uppercase;}
+.form-row input,.form-row select{background:#050510;border:1px solid var(--border-bright);color:var(--text);font-family:'Share Tech Mono',monospace;font-size:12px;padding:7px 10px;outline:none;width:100%;}
+.form-row input:focus,.form-row select:focus{border-color:var(--amber);}
+.form-row select option{background:#0a0a20;}
+.hint{font-size:10px;color:var(--text-dim);line-height:1.6;margin-top:2px;}
+.form-grid{display:grid;grid-template-columns:1fr 1fr;gap:12px;}
+.section-title{font-family:'VT323',monospace;font-size:17px;color:var(--amber-dim);letter-spacing:3px;border-bottom:1px solid var(--border);padding-bottom:6px;margin-bottom:10px;margin-top:4px;}
+.filter-tags{display:flex;flex-wrap:wrap;gap:7px;margin-top:4px;}
+.filter-tag{border:1px solid var(--border-bright);padding:3px 10px;font-size:11px;cursor:pointer;letter-spacing:1px;transition:all .15s;color:var(--text-dim);}
+.filter-tag:hover{border-color:var(--amber);color:var(--amber);}
+.filter-tag.active{border-color:var(--cyan);color:var(--cyan);background:var(--cyan-glow);}
+.channels-list{display:flex;flex-direction:column;gap:7px;}
+.channel-item{background:#050510;border:1px solid var(--border);padding:10px 14px;display:flex;align-items:center;gap:12px;}
+.channel-item-num{font-family:'VT323',monospace;font-size:24px;color:var(--amber);width:36px;}
+.ch-type-badge{font-size:9px;padding:2px 6px;letter-spacing:1px;border:1px solid;white-space:nowrap;}
+.ch-type-badge.movie{border-color:var(--cyan-dim);color:var(--cyan);}
+.ch-type-badge.tv{border-color:#6644aa;color:#bb88ff;}
+.ch-type-badge.marathon-tv{border-color:#cc6600;color:#ff9933;}
+.ch-type-badge.marathon-movie{border-color:#006644;color:#00cc88;}
+.channel-item-info{flex:1;min-width:0;}
+.channel-item-name{font-family:'Oswald',sans-serif;font-size:14px;color:var(--text-bright);}
+.channel-item-desc{font-size:10px;color:var(--text-dim);margin-top:2px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;}
+.btn{background:transparent;border:1px solid var(--amber);color:var(--amber);font-family:'Share Tech Mono',monospace;font-size:11px;padding:7px 16px;cursor:pointer;letter-spacing:1px;text-transform:uppercase;transition:all .2s;white-space:nowrap;}
+.btn:hover{background:var(--amber-glow);box-shadow:0 0 15px var(--amber-glow);}
+.btn.cyan{border-color:var(--cyan);color:var(--cyan);}
+.btn.cyan:hover{background:var(--cyan-glow);}
+.btn.green{border-color:var(--green);color:var(--green);}
+.btn.green:hover{background:rgba(0,255,136,.08);}
+.btn.danger{border-color:var(--red);color:var(--red);}
+.btn.danger:hover{background:rgba(255,51,85,.1);}
+.btn-sm{padding:3px 9px;font-size:10px;}
+.tab-bar{display:flex;border-bottom:1px solid var(--border);margin-bottom:14px;}
+.tab{padding:8px 18px;font-size:11px;cursor:pointer;letter-spacing:2px;color:var(--text-dim);border-bottom:2px solid transparent;transition:all .15s;}
+.tab:hover{color:var(--text);}
+.tab.active{color:var(--amber);border-bottom-color:var(--amber);}
+.tab-panel{display:none;flex-direction:column;gap:14px;}
+.tab-panel.active{display:flex;}
+.info-box{background:#050510;border:1px solid var(--border);padding:10px 14px;font-size:11px;color:var(--text-dim);line-height:1.7;}
+.info-box .info-title{color:var(--amber);letter-spacing:2px;margin-bottom:4px;font-size:10px;}
+.library-checkboxes{display:flex;flex-direction:column;gap:6px;}
+.lib-check{display:flex;align-items:center;gap:10px;padding:6px 10px;border:1px solid var(--border);cursor:pointer;}
+.lib-check input[type=checkbox]{accent-color:var(--cyan);width:14px;height:14px;cursor:pointer;}
+.lib-check-label{font-size:12px;color:var(--text);flex:1;}
+.lib-check-type{font-size:10px;color:var(--text-dim);letter-spacing:1px;}
+.empty-msg{padding:40px;text-align:center;color:var(--text-dim);font-size:12px;letter-spacing:2px;}
+#setup-modal .modal{border-top-color:var(--cyan);box-shadow:0 0 60px var(--cyan-glow);}
+#setup-modal .modal-header h2{color:var(--cyan);text-shadow:0 0 10px var(--cyan);}
+
+/* ── TOAST ── */
+#toast{position:fixed;bottom:28px;left:50%;transform:translateX(-50%) translateY(80px);background:#0a0a20;border:1px solid var(--amber);color:var(--amber);font-size:12px;padding:9px 22px;letter-spacing:2px;z-index:3000;transition:transform .3s;box-shadow:0 0 20px rgba(255,176,0,.3);white-space:nowrap;}
+#toast.show{transform:translateX(-50%) translateY(0);}
+
+/* ── LOADING ── */
+/* loading overlay removed */
+
+/* ── FULLSCREEN PLAYER ── */
+#player-fullscreen{position:fixed;inset:0;background:#000;z-index:500;display:flex;flex-direction:column;isolation:isolate;}
+#player-fullscreen.hidden{display:none;}
+#video-player{position:absolute;inset:0;width:100%;height:100%;object-fit:contain;background:#000;z-index:1;}
+#fs-topbar{position:absolute;top:0;left:0;right:0;height:64px;background:linear-gradient(to bottom,rgba(0,0,0,.92),transparent);display:flex;align-items:center;padding:0 22px;gap:18px;z-index:10;}
+#fs-back-btn{background:rgba(255,176,0,.12);border:1px solid var(--amber);color:var(--amber);font-family:'Share Tech Mono',monospace;font-size:13px;padding:8px 18px;cursor:pointer;letter-spacing:2px;text-transform:uppercase;transition:all .2s;white-space:nowrap;}
+#fs-back-btn:hover{background:var(--amber);color:#000;box-shadow:0 0 20px var(--amber);}
+#fs-channel-info{display:flex;flex-direction:column;gap:1px;}
+#fs-channel-num{font-family:'VT323',monospace;font-size:28px;color:var(--amber);text-shadow:0 0 15px var(--amber);line-height:1;}
+#fs-channel-name{font-size:10px;color:rgba(255,255,255,0.8);letter-spacing:2px;text-transform:uppercase;}
+#fs-live-badge{background:var(--red);color:#fff;font-size:10px;font-family:'Share Tech Mono',monospace;padding:3px 9px;letter-spacing:2px;}
+#fs-clock-display{font-family:'VT323',monospace;font-size:26px;color:var(--green);text-shadow:0 0 10px var(--green);margin-left:auto;letter-spacing:2px;}
+
+#fs-infobar{position:absolute;bottom:0;left:0;right:0;background:linear-gradient(to top,rgba(0,0,0,.96) 55%,transparent);padding:44px 28px 18px;display:flex;align-items:flex-end;gap:28px;z-index:10;}
+#fs-now-section{flex:2;min-width:0;}
+#fs-now-label{font-size:9px;color:var(--cyan);letter-spacing:3px;margin-bottom:5px;}
+#fs-now-title{font-family:'Oswald',sans-serif;font-size:30px;color:#fff;letter-spacing:1px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;text-shadow:0 2px 10px rgba(0,0,0,.8);line-height:1.1;}
+#fs-now-meta{font-size:11px;color:var(--text-dim);margin-top:5px;display:flex;gap:10px;flex-wrap:wrap;}
+#fs-now-meta span{border:1px solid var(--amber-dim);padding:2px 7px;color:var(--amber);}
+#fs-progress-section{flex:3;}
+#fs-time-row{display:flex;align-items:center;gap:10px;font-family:'Share Tech Mono',monospace;font-size:12px;color:var(--amber);}
+#fs-progress-bar{flex:1;height:6px;background:rgba(255,255,255,.12);position:relative;overflow:hidden;}
+#fs-progress-fill{height:100%;background:linear-gradient(90deg,var(--cyan),var(--amber));box-shadow:0 0 8px var(--cyan);width:0%;transition:width 1s linear;}
+#fs-no-rewind{position:absolute;inset:0;display:flex;align-items:center;justify-content:center;font-size:7px;color:rgba(255,176,0,.22);letter-spacing:2px;pointer-events:none;font-family:'Share Tech Mono',monospace;}
+#fs-next-section{flex:1;text-align:right;min-width:150px;}
+#fs-next-label{font-size:9px;color:var(--text-dim);letter-spacing:3px;margin-bottom:3px;}
+#fs-next-title{font-family:'Oswald',sans-serif;font-size:15px;color:var(--text);white-space:nowrap;overflow:hidden;text-overflow:ellipsis;}
+#fs-next-time{font-size:11px;color:var(--cyan);margin-top:2px;}
+#fs-static-overlay{position:absolute;inset:0;display:flex;flex-direction:column;align-items:center;justify-content:center;z-index:5;background:#000;}
+#fs-static-overlay.hidden{display:none;}
+#fs-static-noise{position:absolute;inset:0;background-image:url("data:image/svg+xml,%3Csvg viewBox='0 0 200 200' xmlns='http://www.w3.org/2000/svg'%3E%3Cfilter id='n'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.9' numOctaves='4' stitchTiles='stitch'/%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url(%23n)' opacity='0.4'/%3E%3C/svg%3E");background-size:200px;opacity:.18;animation:static-anim .08s infinite;}
+.fs-no-signal{font-family:'VT323',monospace;font-size:50px;color:var(--amber);text-shadow:0 0 30px var(--amber);letter-spacing:8px;animation:blink 1.5s infinite;position:relative;z-index:1;}
+#fs-click-play{position:absolute;inset:0;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:18px;z-index:8;cursor:pointer;background:rgba(0,0,0,.55);}
+#fs-click-play.hidden{display:none;}
+#fs-play-icon{font-size:76px;color:var(--amber);text-shadow:0 0 40px var(--amber);animation:pulse 1.5s infinite;}
+#fs-play-hint{font-family:'VT323',monospace;font-size:22px;color:var(--text-dim);letter-spacing:4px;}
+
+/* ── SETTINGS DROPDOWN ───────────────────── */
+#settings-dropdown{position:absolute;top:52px;right:16px;background:var(--surface);border:1px solid var(--amber);box-shadow:0 4px 24px rgba(0,0,0,.7);z-index:800;min-width:200px;}
+#settings-dropdown.hidden{display:none;}
+.settings-item{display:flex;align-items:center;gap:10px;padding:13px 18px;cursor:pointer;font-size:12px;letter-spacing:2px;color:var(--text);transition:background .15s;border-bottom:1px solid var(--border);}
+.settings-item:last-child{border-bottom:none;}
+.settings-item:hover{background:rgba(255,176,0,.1);color:var(--amber);}
+.settings-item-icon{font-size:16px;}
+
+
+/* ── PIN MODAL ────────────────────────────── */
+#pin-modal{position:fixed;inset:0;background:rgba(0,0,0,.85);display:flex;align-items:center;justify-content:center;z-index:9000;}
+#pin-modal.hidden{display:none;}
+#pin-box{background:var(--bg);border:1px solid var(--amber);box-shadow:0 0 40px rgba(255,176,0,.3);padding:36px 40px;min-width:320px;text-align:center;transition:transform .08s;}
+#pin-box h2{font-family:'VT323',monospace;font-size:36px;color:var(--amber);letter-spacing:4px;margin-bottom:8px;}
+#pin-box p{font-size:11px;color:var(--text-dim);letter-spacing:2px;margin-bottom:20px;}
+#pin-dots{display:flex;justify-content:center;gap:12px;margin-bottom:20px;}
+.pin-dot{width:14px;height:14px;border-radius:50%;border:2px solid var(--text-dim);background:transparent;transition:background .15s;}
+.pin-dot.filled{background:var(--amber);border-color:var(--amber);}
+#pin-keypad{display:grid;grid-template-columns:repeat(3,1fr);gap:8px;margin-bottom:16px;}
+.pin-key{background:rgba(255,255,255,.04);border:1px solid var(--border);color:var(--text);font-family:'Share Tech Mono',monospace;font-size:20px;padding:12px;cursor:pointer;transition:all .15s;}
+.pin-key:hover{background:rgba(255,176,0,.15);border-color:var(--amber);color:var(--amber);}
+#pin-error{color:var(--red);font-size:11px;letter-spacing:2px;height:16px;}
+
+/* ── CHANNEL UP/DOWN ──────────────────────── */
+#fs-ch-prev,#fs-ch-next{position:absolute;top:50%;transform:translateY(-50%);background:rgba(0,0,0,.45);border:1px solid rgba(255,176,0,.3);color:var(--amber);font-size:28px;width:48px;height:72px;cursor:pointer;display:flex;align-items:center;justify-content:center;transition:all .2s;z-index:20;}
+#fs-ch-prev{left:0;border-left:none;border-radius:0 4px 4px 0;}
+#fs-ch-next{right:0;border-right:none;border-radius:4px 0 0 4px;}
+#fs-ch-prev:hover,#fs-ch-next:hover{background:rgba(255,176,0,.2);border-color:var(--amber);}
+/* Idle fade — overlays fade out after 15s of no mouse movement */
+#player-fullscreen.ui-hidden #fs-topbar,
+#player-fullscreen.ui-hidden #fs-infobar,
+#player-fullscreen.ui-hidden #fs-ch-prev,
+#player-fullscreen.ui-hidden #fs-ch-next{ opacity:0; transition:opacity .5s; }
+#player-fullscreen.ui-hidden{ cursor:none; }
+
+
+#fs-ch-label{position:absolute;left:50%;top:50%;transform:translate(-50%,-50%);font-family:'VT323',monospace;font-size:72px;color:var(--amber);text-shadow:0 0 40px var(--amber);pointer-events:none;opacity:0;transition:opacity .4s;z-index:25;}
+#fs-ch-label.show{opacity:1;}
+
+/* ── WEEK CARDS ───────────────────────────── */
+.week-card{background:rgba(255,255,255,.03);border:1px solid var(--border);padding:12px;text-align:center;}
+.week-card.built{border-color:var(--green);background:rgba(0,255,136,.05);}
+.week-card-num{font-family:'VT323',monospace;font-size:22px;color:var(--amber);letter-spacing:2px;}
+.week-card-dates{font-size:10px;color:var(--text-dim);letter-spacing:1px;margin:4px 0;}
+.week-card-status{font-size:10px;letter-spacing:2px;color:var(--text-dim);}
+.week-card.built .week-card-status{color:var(--green);}
+
+/* ── HOUR GRID ────────────────────────────── */
+.hour-grid{display:flex;flex-wrap:wrap;gap:4px;padding:4px 0;}
+.hour-chip{background:rgba(255,255,255,.04);border:1px solid var(--border);color:var(--text-dim);font-size:10px;padding:4px 8px;cursor:pointer;transition:all .15s;user-select:none;letter-spacing:1px;}
+.hour-chip.active{background:rgba(0,255,231,.12);border-color:var(--cyan);color:var(--cyan);}
+.hour-chip:hover{border-color:var(--text);color:var(--text);}
+.hour-grid-controls{display:flex;gap:6px;margin-bottom:6px;}
+.hour-grid-controls button{font-size:9px;padding:3px 8px;letter-spacing:1px;}
+
+/* ── CHANNEL LIST ACTIONS ─────────────────── */
+.channel-item-actions{display:flex;gap:6px;}
+
+/* ── Favorites ── */
+.fav-star{position:absolute;top:5px;right:5px;background:none;border:none;cursor:pointer;font-size:15px;line-height:1;padding:2px;opacity:0.2;transition:opacity .15s,transform .15s;z-index:11;color:#ffd700;}
+.fav-star:hover{opacity:0.8;}
+.fav-star.active{opacity:1;transform:scale(1.2);}
+.channel-label.fav-lit{border-left:3px solid #ffd700;}
+#btn-favs{background:transparent;border:1px solid var(--border-bright);color:var(--text-dim);font-family:'Share Tech Mono',monospace;font-size:12px;letter-spacing:1px;padding:3px 10px;cursor:pointer;transition:all .2s;}
+#btn-favs:hover{border-color:var(--amber);color:var(--amber);}
+#btn-favs.active{border-color:#ffd700;color:#ffd700;background:rgba(255,215,0,.1);}
+
+/* ── PiP: shrink player-fullscreen ── */
+#player-fullscreen.pip-mode{
+  position:fixed !important; inset:auto !important;
+  top:80px !important; right:24px !important;
+  bottom:auto !important; left:auto !important;
+  width:380px !important; height:214px !important;
+  z-index:801; overflow:hidden !important;
+  border:3px solid var(--amber) !important;
+  border-bottom:none !important;
+  box-shadow:0 0 0 1px rgba(255,176,0,.3),0 8px 40px rgba(0,0,0,.9) !important;
+  border-radius:3px 3px 0 0 !important;
+}
+#player-fullscreen.pip-mode #video-player{width:100% !important;height:214px !important;object-fit:cover !important;cursor:pointer !important;}
+#player-fullscreen.pip-mode #fs-topbar,
+#player-fullscreen.pip-mode #fs-infobar,
+#player-fullscreen.pip-mode #fs-ch-prev,
+#player-fullscreen.pip-mode #fs-ch-next,
+#player-fullscreen.pip-mode #fs-ch-label,
+#player-fullscreen.pip-mode #fs-static-overlay,
+#player-fullscreen.pip-mode #fs-click-play{display:none !important;}
+
+/* ── PiP info+controls panel (sits below shrunken player) ── */
+#pip-window{
+  display:none; position:fixed;
+  top:calc(80px + 214px + 3px); right:24px;
+  width:380px; z-index:801;
+  flex-direction:column;
+  background:#08081a;
+  border:3px solid var(--amber); border-top:2px solid rgba(255,176,0,.4);
+  box-shadow:0 8px 40px rgba(0,0,0,.9);
+  border-radius:0 0 3px 3px; overflow:hidden;
+}
+#pip-window.active{display:flex;}
+#pip-info-panel{padding:8px 12px 7px;border-bottom:1px solid var(--border);}
+#pip-now-label{font-size:9px;letter-spacing:2px;color:var(--cyan);margin-bottom:3px;font-family:'Share Tech Mono',monospace;}
+#pip-now-title{font-family:'Oswald',sans-serif;font-size:16px;color:#fff;letter-spacing:.5px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;}
+#pip-now-meta{display:flex;gap:6px;flex-wrap:wrap;margin-top:4px;}
+#pip-now-meta span{font-size:9px;color:var(--text-dim);border:1px solid var(--border-bright);padding:1px 5px;letter-spacing:.5px;font-family:'Share Tech Mono',monospace;}
+#pip-channel-bug{font-family:'VT323',monospace;font-size:11px;color:var(--amber-dim);letter-spacing:1px;margin-bottom:2px;}
+#pip-controls{display:flex;align-items:stretch;border-top:1px solid var(--border);}
+#pip-prev-btn,#pip-next-btn{background:rgba(255,176,0,.06);border:none;border-right:1px solid var(--border);color:var(--amber);font-size:22px;width:52px;cursor:pointer;display:flex;align-items:center;justify-content:center;font-family:'VT323',monospace;transition:background .15s;height:40px;flex-shrink:0;}
+#pip-next-btn{border-right:none;border-left:1px solid var(--border);}
+#pip-prev-btn:hover,#pip-next-btn:hover{background:rgba(255,176,0,.2);}
+#pip-stop-btn{flex:1;background:none;border:none;color:var(--red);font-family:'Share Tech Mono',monospace;font-size:11px;letter-spacing:2px;height:40px;cursor:pointer;transition:background .15s;}
+#pip-stop-btn:hover{background:rgba(255,51,85,.15);}
+/* Progress bar on video */
+#pip-progress-bar{position:absolute;bottom:0;left:0;height:3px;background:linear-gradient(90deg,var(--cyan),var(--amber));width:0%;pointer-events:none;z-index:5;}
+/* Push guide when pip active */
+body.pip-active #guide-body{margin-right:408px;transition:margin-right .2s ease;}
+/* channel-label overflow for star */
+.channel-label{overflow:visible !important;}
+
+#pip-loading{display:none;position:absolute;inset:0;background:rgba(0,0,0,0.75);
+  z-index:10;align-items:center;justify-content:center;
+  font-family:'VT323',monospace;font-size:28px;color:var(--amber);letter-spacing:4px;
+  text-shadow:0 0 10px rgba(255,176,0,.5);}
+#player-fullscreen.pip-mode.pip-loading-active #pip-loading{display:flex;}
+
+
+/* ── Primetime (8-10pm) ── */
+.program-cell.primetime{
+  background:rgba(60,40,0,0.6) !important;
+  border-top:2px solid rgba(255,176,0,0.9) !important;
+}
+.program-cell.primetime.now-playing{
+  background:rgba(80,55,0,0.75) !important;
+}
+
+/* ═══════════════════════════════════
+   MOBILE STYLES (max-width: 768px)
+   ═══════════════════════════════════ */
+@media (max-width: 768px) {
+
+  /* Topbar: forced single row - aggressive mobile layout */
+  #topbar {
+    height: 44px !important;
+    padding: 0 8px !important;
+    gap: 6px !important;
+    flex-wrap: nowrap !important;
+    overflow: hidden !important;
+  }
+  #logo { font-size: 14px !important; letter-spacing: 1px; flex-shrink: 0; }
+  #date-display { display: none !important; }
+  /* Hide all time nav except NOW button */
+  #time-controls { display: none !important; }
+  #btn-favs { display: none !important; }
+  .topbar-btn { font-size: 14px !important; padding: 2px 6px !important; flex-shrink: 0; }
+  #clock { font-size: 16px !important; margin-left: auto; flex-shrink: 0; font-family: 'VT323', monospace; }
+
+  /* Connection bar: compact */
+  #connection-bar { font-size: 9px; padding: 2px 8px; }
+
+  /* Guide channel labels: narrow, show only number */
+  .channel-label { width: 52px !important; padding: 4px; }
+  .channel-num { font-size: 20px; }
+  .channel-name { display: none; }
+  .channel-genre { display: none; }
+  .ch-type-badge { display: none; }
+  .fav-star { font-size: 9px; top: 1px; right: 1px; }
+  #channel-label-col { width: 52px !important; font-size: 8px; letter-spacing: 0; }
+
+  /* Program cells */
+  .prog-title { font-size: 12px; }
+  .prog-time { font-size: 9px; }
+  .prog-info { display: none; }
+
+  /* Guide: enable horizontal scroll on mobile */
+  #guide-scroll-container {
+    overflow-x: auto !important;
+    overflow-y: auto !important;
+    -webkit-overflow-scrolling: touch !important;
+  }
+  #guide-body { overflow: auto !important; }
+  .guide-row { display: flex !important; height: var(--channel-h) !important; }
+  .programs-row {
+    flex: 1 !important;
+    position: relative !important;
+    overflow-x: auto !important;
+    overflow-y: hidden !important;
+    -webkit-overflow-scrolling: touch !important;
+    height: var(--channel-h) !important;
+  }
+  .programs-inner { position: relative !important; height: 100% !important; display: block !important; }
+  .program-cell { position: absolute !important; top: 0 !important; height: 100% !important; }
+
+  /* Player fullscreen */
+  #player-fullscreen { touch-action: manipulation; }
+  #video-player { object-fit: contain !important; width: 100% !important; height: 100% !important; }
+  #fs-topbar { padding: 4px 8px; gap: 6px; height: 50px !important; }
+  #fs-back-btn, #fs-stop-btn { font-size: 11px; padding: 4px 8px; }
+  #fs-channel-num { font-size: 18px; }
+  #fs-channel-name { font-size: 9px; }
+  #fs-clock-display { font-size: 13px; }
+  #fs-infobar { padding: 8px; max-height: 120px; }
+  #fs-next-section { display: none !important; }
+  #fs-now-title { font-size: 20px; }
+  #fs-now-meta { font-size: 10px; }
+  #fs-ch-prev, #fs-ch-next { width: 44px !important; font-size: 20px; }
+  #fs-progress-bar { height: 2px !important; }
+
+  /* PiP: don't push guide off screen on mobile */
+  body.pip-active #guide-body { margin-right: 0 !important; }
+
+  /* PiP: fixed overlay at bottom, floats over guide */
+  #player-fullscreen.pip-mode {
+    position: fixed !important;
+    top: auto !important;
+    bottom: 70px !important;
+    right: 0 !important; left: 0 !important;
+    width: 100% !important;
+    height: 56vw !important;
+    border-radius: 0 !important;
+    border-left: none !important; border-right: none !important;
+    border-bottom: none !important;
+  }
+  #pip-window {
+    position: fixed !important;
+    top: auto !important;
+    bottom: 0 !important;
+    right: 0 !important; left: 0 !important;
+    width: 100% !important;
+    border-radius: 0 !important;
+    flex-direction: row;
+    height: 70px;
+    z-index: 802;
+  }
+  #pip-info-panel { flex: 1; padding: 4px 8px; min-width: 0; }
+  #pip-channel-bug { font-size: 12px; }
+  #pip-now-label { font-size: 8px; }
+  #pip-now-title { font-size: 13px; }
+  #pip-now-meta { display: none; }
+  #pip-controls { flex-direction: column; min-width: 60px; }
+  #pip-prev-btn, #pip-next-btn { padding: 2px; font-size: 14px; flex: 1; }
+  #pip-stop-btn { padding: 2px 4px; font-size: 9px; }
+
+  /* Modals: full width */
+  .modal { width: 95vw !important; max-height: 90vh; }
+}
+
+@media (max-width: 480px) {
+  #logo { font-size: 14px; }
+  .channel-label { width: 44px !important; }
+  #channel-label-col { width: 44px !important; }
+  .channel-num { font-size: 17px; }
+}
+
+/* ── THEMES ────────────────────────────────────────────────────────────────── */
+/* Amber (default) — already in :root */
+
+body[data-theme="green"] {
+  --bg:#020f02; --surface:#031003; --border:#0a2a0a; --border-bright:#1a4a1a;
+  --amber:#00ff41; --amber-dim:#005514; --amber-glow:rgba(0,255,65,0.15);
+  --cyan:#00ff41; --cyan-dim:#005514; --cyan-glow:rgba(0,255,65,0.1);
+  --text:#00cc33; --text-dim:#005510; --text-bright:#00ff41;
+  --scanline:rgba(0,0,0,0.35);
+}
+
+body[data-theme="blue"] {
+  --bg:#000814; --surface:#00102a; --border:#002050; --border-bright:#003a90;
+  --amber:#00b4ff; --amber-dim:#003a60; --amber-glow:rgba(0,180,255,0.15);
+  --cyan:#00e5ff; --cyan-dim:#004060; --cyan-glow:rgba(0,229,255,0.12);
+  --text:#a0d4ff; --text-dim:#204060; --text-bright:#e0f4ff;
+  --scanline:rgba(0,0,20,0.3);
+}
+
+body[data-theme="white"] {
+  --bg:#0a0a0a; --surface:#141414; --border:#2a2a2a; --border-bright:#444;
+  --amber:#e8e8e8; --amber-dim:#555; --amber-glow:rgba(232,232,232,0.1);
+  --cyan:#aaaaaa; --cyan-dim:#333; --cyan-glow:rgba(170,170,170,0.1);
+  --text:#cccccc; --text-dim:#555; --text-bright:#ffffff;
+  --scanline:rgba(0,0,0,0.2);
+}
+
+body[data-theme="red"] {
+  --bg:#0f0002; --surface:#1a0005; --border:#3a0010; --border-bright:#6a0020;
+  --amber:#ff2244; --amber-dim:#6a0015; --amber-glow:rgba(255,34,68,0.15);
+  --cyan:#ff6688; --cyan-dim:#500020; --cyan-glow:rgba(255,102,136,0.1);
+  --text:#ff9aaa; --text-dim:#500020; --text-bright:#ffccdd;
+  --scanline:rgba(20,0,5,0.3);
+}
+
+/* ── THEME PICKER POPUP ──────────────────────────────────────────────────────*/
+#theme-popup {
+  display: none; position: fixed;
+  top: calc(var(--header-h) + 8px); right: 60px;
+  background: var(--surface);
+  border: 2px solid var(--amber);
+  box-shadow: 0 0 20px var(--amber-glow), 0 4px 20px rgba(0,0,0,0.8);
+  z-index: 600; padding: 12px;
+  font-family: 'Share Tech Mono', monospace;
+}
+#theme-popup.open { display: block; }
+#theme-popup h3 {
+  font-family: 'VT323', monospace; font-size: 18px;
+  color: var(--amber); letter-spacing: 2px;
+  margin: 0 0 10px; text-align: center;
+}
+.theme-option {
+  display: flex; align-items: center; gap: 10px;
+  padding: 8px 12px; cursor: pointer;
+  border: 1px solid transparent;
+  letter-spacing: 1px; font-size: 12px;
+  color: var(--text); transition: all .15s;
+  white-space: nowrap;
+}
+.theme-option:hover { border-color: var(--amber); color: var(--text-bright); }
+.theme-option.active { border-color: var(--amber); color: var(--amber); }
+.theme-swatch {
+  width: 14px; height: 14px; border-radius: 2px; flex-shrink: 0;
+  border: 1px solid rgba(255,255,255,0.2);
+}
+#btn-theme { font-size: 11px !important; padding: 4px 10px !important; }
+</style>
+</head>
+<body>
+
+<!-- MAIN APP -->
+<div id="app" style="display:flex;flex-direction:column;height:100vh;">
+  <div id="topbar">
+    <div id="logo">RETRO<span>CAST</span></div>
+    <div id="date-display"></div>
+    <div id="time-controls">
+      <button onclick="shiftTime(-3)">◀◀</button>
+      <button onclick="shiftTime(-1)">◀</button>
+      <span id="time-window-label"></span>
+      <button onclick="goToNow()" style="width:auto;padding:0 8px;font-size:11px;">NOW</button>
+      <button onclick="shiftTime(1)">▶</button>
+      <button onclick="shiftTime(3)">▶▶</button>
+    </div>
+    <button id="btn-favs" onclick="toggleFavFilter()">★ FAVS</button>
+    <button id="btn-scanlines" class="topbar-btn" onclick="toggleScanlines()" title="Toggle Scanlines">▦ SCAN</button>
+    <button id="btn-theme" class="topbar-btn" onclick="toggleThemePopup()" title="Theme">🎨 THEME</button>
+    <button class="topbar-btn" onclick="openSettings()" title="Settings" style="font-size:18px;padding:4px 12px;">⚙</button>
+    <div id="clock"></div>
+  </div>
+
+  <!-- SETTINGS DROPDOWN -->
+  <div id="settings-dropdown" class="hidden">
+    <div class="settings-item" onclick="settingsAction('setup')">
+      <span class="settings-item-icon">🔌</span> SERVER CONNECTION
+    </div>
+    <div class="settings-item" onclick="settingsAction('admin')">
+      <span class="settings-item-icon">📺</span> CHANNEL MANAGER
+    </div>
+  </div>
+
+  <div id="connection-bar">
+    <span style="color:var(--text-dim);">SERVER:</span>
+    <span id="server-display" style="color:var(--red);">NOT CONNECTED</span>
+    <div id="conn-status">
+      <div id="conn-dot"></div>
+      <span id="conn-label" style="color:var(--text-dim);">OFFLINE</span>
+    </div>
+  </div>
+
+  <div id="main">
+    <div id="guide-panel">
+      <div id="guide-time-header">
+        <div id="channel-label-col">CHANNELS</div>
+        <div id="time-slots-header"><div id="time-slots-inner"></div></div>
+      </div>
+      <div id="guide-body">
+        <div id="guide-scroll-container"><div id="guide-grid"></div></div>
+        <div id="time-needle"></div>
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- FULLSCREEN PLAYER -->
+<div id="player-fullscreen" class="hidden">
+  <video id="video-player" preload="auto" playsinline></video>
+  <div id="pip-progress-bar"></div>
+  <div id="pip-loading">⬡ LOADING...</div>
+  <div id="fs-topbar">
+    <button id="fs-back-btn" onclick="enterPip()">⧉ GUIDE</button><button id="fs-stop-btn" onclick="exitPlayer()" style="background:rgba(255,51,85,.12);border:1px solid var(--red);color:var(--red);">■ STOP</button>
+    <div id="fs-channel-info">
+      <span id="fs-channel-num"></span>
+      <span id="fs-channel-name"></span>
+    </div>
+    <div id="fs-live-badge">● LIVE</div>
+    <button id="sound-btn" onclick="toggleSound()">🔇 OFF</button>
+    <div id="fs-clock-display"></div>
+  </div>
+  <button id="fs-ch-prev" onclick="channelStep(-1)">&#9650;</button>
+  <button id="fs-ch-next" onclick="channelStep(1)">&#9660;</button>
+  <div id="fs-ch-label"></div>
+  <div id="fs-static-overlay">
+    <canvas id="fs-static-noise"></canvas>
+    <div class="fs-no-signal">NO SIGNAL</div>
+  </div>
+  <div id="fs-infobar">
+    <div id="fs-now-section">
+      <div id="fs-now-label">NOW PLAYING</div>
+      <div id="fs-now-title"></div>
+      <div id="fs-now-meta"></div>
+    </div>
+    <div id="fs-progress-section">
+      <div id="fs-time-row">
+        <span id="fs-elapsed">00:00:00</span>
+        <div id="fs-progress-bar">
+          <div id="fs-progress-fill"></div>
+          <div id="fs-no-rewind">LIVE — NO REWIND</div>
+        </div>
+        <span id="fs-remaining"></span>
+      </div>
+    </div>
+    <div id="fs-next-section">
+      <div id="fs-next-label">UP NEXT</div>
+      <div id="fs-next-title"></div>
+      <div id="fs-next-time"></div>
+    </div>
+  </div>
+  <div id="fs-click-play" class="hidden" onclick="handleClickToPlay()">
+    <div id="fs-play-icon">▶</div>
+    <div id="fs-play-hint">CLICK TO ENABLE SOUND</div>
+  </div>
+</div>
+
+<!-- SETUP MODAL -->
+<div id="setup-modal" class="modal-overlay hidden">
+  <div class="modal">
+    <div class="modal-header">
+      <h2>⚙ SERVER CONNECTION</h2>
+      <button class="btn btn-sm danger" onclick="closeSetup()">✕ CLOSE</button>
+    </div>
+    <div class="modal-body">
+      <div class="form-row">
+        <label>Plex Server URL</label>
+        <input id="setup-url" type="text" placeholder="http://192.168.1.x:32400"/>
+        <span class="hint">Include http:// and port 32400. Use your LAN IP address.</span>
+      </div>
+      <div class="form-row">
+        <label>Plex Token (X-Plex-Token)</label>
+        <input id="setup-token" type="text" placeholder="Your Plex authentication token"/>
+        <span class="hint">Find it: Plex Web → play anything → DevTools Network tab → look for X-Plex-Token in any request URL.</span>
+      </div>
+      <div id="libraries-section" style="display:none;">
+        <div class="section-title">SELECT LIBRARIES TO SCAN</div>
+        <span class="hint" style="margin-bottom:6px;display:block;">Choose which Plex libraries to include. Movie and TV libraries are both supported.</span>
+        <div id="library-list" class="library-checkboxes"></div>
+      </div>
+      <div class="info-box">
+        <div class="info-title">⚠ NOTE</div>
+        RetroCast must run on the same network as your Plex server. Settings and guide data are saved to <strong>retrocast-data.json</strong> on your server and shared across all devices.
+      </div>
+    </div>
+    <div class="modal-footer">
+      <button class="btn" onclick="closeSetup()">CANCEL</button>
+      <button class="btn cyan" onclick="connectPlex(false)">▶ CONNECT &amp; SCAN</button>
+      <button id="btn-save-load" class="btn green" style="display:none;" onclick="requirePin('saveConnect')">✓ SAVE &amp; LOAD MEDIA</button>
+    </div>
+  </div>
+</div>
+
+<!-- ADMIN MODAL -->
+<div id="admin-modal" class="modal-overlay hidden">
+  <div class="modal" style="width:900px;max-height:92vh;">
+    <div class="modal-header">
+      <h2>📺 CHANNEL MANAGER</h2>
+      <button class="btn btn-sm danger" onclick="closeAdmin()">✕ CLOSE</button>
+    </div>
+    <div class="modal-body">
+      <div class="tab-bar">
+        <div class="tab active" data-panel="tab-channels" onclick="switchTab(this)">CHANNELS</div>
+        <div class="tab" data-panel="tab-schedule" onclick="switchTab(this)">SCHEDULE</div>
+        <div class="tab" data-panel="tab-edit" onclick="switchTab(this)" id="tab-edit-trigger" style="display:none;">EDIT CHANNEL</div>
+        <div class="tab" data-panel="tab-movie" onclick="switchTab(this)">+ MOVIE</div>
+        <div class="tab" data-panel="tab-tv" onclick="switchTab(this)">+ TV</div>
+        <div class="tab" data-panel="tab-marathon-tv" onclick="switchTab(this)">+ MARATHON TV</div>
+        <div class="tab" data-panel="tab-marathon-movie" onclick="switchTab(this)">+ MARATHON MOVIE</div>
+      </div>
+
+      <!-- ── CHANNELS LIST TAB ── -->
+      <div id="tab-channels" class="tab-panel active">
+        <div id="channels-list" class="channels-list"><div class="empty-msg">NO CHANNELS YET</div></div>
+      </div>
+
+      <!-- ── SCHEDULE TAB ── -->
+      <div id="tab-schedule" class="tab-panel">
+        <div style="display:flex;align-items:center;gap:12px;margin-bottom:14px;flex-wrap:wrap;">
+          <div style="font-size:11px;color:var(--text-dim);letter-spacing:1px;">2-WEEK ROLLING SCHEDULE — THIS WEEK + NEXT WEEK</div>
+          <div style="flex:1;"></div>
+          <button class="btn cyan btn-sm" onclick="requirePin('buildWeek:0')">REBUILD THIS WEEK</button>
+          <button class="btn cyan btn-sm" onclick="requirePin('buildWeek:1')">REBUILD NEXT WEEK</button>
+          <button class="btn green btn-sm" onclick="requirePin('buildAll')">▶ BUILD BOTH WEEKS</button>
+        </div>
+        <div id="schedule-status" style="font-size:11px;color:var(--text-dim);letter-spacing:1px;margin-bottom:10px;"></div>
+        <div id="week-coverage" style="display:grid;grid-template-columns:repeat(4,1fr);gap:8px;">
+          <div class="week-card" id="week-card-1"><div class="week-card-num">WEEK 1</div><div class="week-card-dates" id="wk-dates-1">—</div><div class="week-card-status" id="wk-status-1">NOT BUILT</div></div>
+          <div class="week-card" id="week-card-2"><div class="week-card-num">WEEK 2</div><div class="week-card-dates" id="wk-dates-2">—</div><div class="week-card-status" id="wk-status-2">NOT BUILT</div></div>
+          <div class="week-card" id="week-card-3"><div class="week-card-num">WEEK 3</div><div class="week-card-dates" id="wk-dates-3">—</div><div class="week-card-status" id="wk-status-3">NOT BUILT</div></div>
+          <div class="week-card" id="week-card-4"><div class="week-card-num">WEEK 4</div><div class="week-card-dates" id="wk-dates-4">—</div><div class="week-card-status" id="wk-status-4">NOT BUILT</div></div>
+        </div>
+        <div class="info-box" style="margin-top:14px;">
+          <div class="info-title">ℹ SCHEDULE INFO</div>
+          Each week runs Mon–Sun. Rebuilding reshuffles content randomly. RetroCast auto-builds any missing weeks on startup.
+          Off-air hours loop your designated off-air library. PSA plays at 10pm on TV channels if enabled.
+        </div>
+      </div>
+
+      <!-- ── EDIT CHANNEL TAB (populated dynamically) ── -->
+      <div id="tab-edit" class="tab-panel">
+        <div id="edit-form-container"></div>
+      </div>
+
+      <!-- ── ADD MOVIE CHANNEL TAB ── -->
+      <div id="tab-movie" class="tab-panel">
+        <div class="form-grid">
+          <div class="form-row"><label>Channel Number</label><input id="mv-num" type="number" placeholder="e.g. 10" min="1" max="999"/></div>
+          <div class="form-row"><label>Channel Name</label><input id="mv-name" type="text" placeholder="e.g. 80s Action"/></div>
+        </div>
+        <div class="form-row">
+          <label>Source Libraries</label>
+          <div id="mv-lib-tags" class="filter-tags"><span class="hint">Connect to Plex first</span></div>
+        </div>
+        <div class="form-row">
+          <label>Collection <span class="hint" style="display:inline;">(optional — uses collection order, ignores genre/sort filters)</span></label>
+          <div id="mv-collection-tags" class="filter-tags"><span class="hint">Connect to Plex to load collections</span></div>
+        </div>
+        <div class="form-row">
+          <label>Genre Filter <span class="hint" style="display:inline;">(leave blank = all)</span></label>
+          <div id="mv-genre-tags" class="filter-tags">
+            <div class="filter-tag" data-val="Action">Action</div><div class="filter-tag" data-val="Adventure">Adventure</div>
+            <div class="filter-tag" data-val="Animation">Animation</div><div class="filter-tag" data-val="Comedy">Comedy</div>
+            <div class="filter-tag" data-val="Crime">Crime</div><div class="filter-tag" data-val="Documentary">Documentary</div>
+            <div class="filter-tag" data-val="Drama">Drama</div><div class="filter-tag" data-val="Family">Family</div>
+            <div class="filter-tag" data-val="Fantasy">Fantasy</div><div class="filter-tag" data-val="Horror">Horror</div>
+            <div class="filter-tag" data-val="Mystery">Mystery</div><div class="filter-tag" data-val="Romance">Romance</div>
+            <div class="filter-tag" data-val="Sci-Fi">Sci-Fi</div><div class="filter-tag" data-val="Thriller">Thriller</div>
+            <div class="filter-tag" data-val="Western">Western</div>
+          </div>
+        </div>
+        <div class="form-row">
+          <label>Label Filter <span class="hint" style="display:inline;">(optional)</span></label>
+          <div id="mv-label-tags" class="filter-tags"><span class="hint">Connect to Plex to load labels</span></div>
+        </div>
+        <div class="form-grid">
+          <div class="form-row">
+            <label>Decade</label>
+            <select id="mv-decade">
+              <option value="">Any</option><option value="1950">1950s</option><option value="1960">1960s</option>
+              <option value="1970">1970s</option><option value="1980">1980s</option><option value="1990">1990s</option>
+              <option value="2000">2000s</option><option value="2010">2010s</option><option value="2020">2020s</option>
+            </select>
+          </div>
+          <div class="form-row">
+            <label>Max Content Rating</label>
+            <select id="mv-max-rating">
+              <option value="">Any Rating</option>
+              <option value="G">G</option><option value="PG">PG</option><option value="PG-13">PG-13</option>
+              <option value="R">R</option><option value="NC-17">NC-17</option>
+            </select>
+          </div>
+        </div>
+        <div class="form-grid">
+          <div class="form-row">
+            <label>Sort Order</label>
+            <select id="mv-sort">
+              <option value="random">Random Shuffle</option><option value="rating">Highest Rated</option>
+              <option value="year">Newest First</option><option value="year_asc">Oldest First</option>
+              <option value="title">Alphabetical</option>
+            </select>
+          </div>
+          <div class="form-row"><label>Max Movies (0 = all)</label><input id="mv-max" type="number" value="0" min="0"/></div>
+        </div>
+        <div class="section-title">BROADCAST HOURS</div>
+        <div class="form-row">
+          <label>On-Air Hours <span class="hint" style="display:inline;">(check hours to broadcast)</span></label>
+          <div id="mv-broadcast-hours" class="hour-grid"></div>
+        </div>
+        <div class="form-row">
+          <label>Off-Air Library <span class="hint" style="display:inline;">(plays when channel is off-air)</span></label>
+          <div id="mv-offair-lib-tags" class="filter-tags"><span class="hint">Connect to Plex first</span></div>
+        </div>
+        <div class="section-title">COMMERCIALS (OPTIONAL)</div>
+        <div class="form-grid">
+          <div class="form-row">
+            <label>Commercials Library</label>
+            <div id="mv-comm-lib-tags" class="filter-tags"><span class="hint">No commercial libraries found</span></div>
+          </div>
+          <div class="form-row">
+            <label>Insert Commercials</label>
+            <select id="mv-comm-mode" onchange="toggleCommInterval('mv')">
+              <option value="none">Disabled</option>
+              <option value="between">Between Each Movie</option>
+              <option value="count">Every X Movies</option>
+            </select>
+          </div>
+        </div>
+        <div class="form-row" id="mv-comm-interval-row" style="display:none;">
+          <label>Insert After Every <span class="hint" style="display:inline;">movies</span></label>
+          <input id="mv-comm-interval" type="number" value="1" min="1" max="20"/>
+        </div>
+        <div class="form-row" id="mv-comm-dur-row" style="display:none;">
+          <label>Number of Spots <span class="hint" style="display:inline;">per break</span></label>
+          <input id="mv-comm-duration" type="number" value="2" min="1" max="10"/>
+        </div>
+        <div style="display:flex;justify-content:flex-end;margin-top:8px;">
+          <button class="btn cyan" onclick="requirePin('addMovie')">+ ADD MOVIE CHANNEL</button>
+        </div>
+      </div>
+
+      <!-- ── ADD TV CHANNEL TAB ── -->
+      <div id="tab-tv" class="tab-panel">
+        <div class="form-grid">
+          <div class="form-row"><label>Channel Number</label><input id="tv-num" type="number" placeholder="e.g. 20" min="1" max="999"/></div>
+          <div class="form-row"><label>Channel Name</label><input id="tv-name" type="text" placeholder="e.g. Sitcom Central"/></div>
+        </div>
+        <div class="form-row">
+          <label>Source Libraries</label>
+          <div id="tv-lib-tags" class="filter-tags"><span class="hint">Connect to Plex first</span></div>
+        </div>
+        <div class="form-row">
+          <label>Collection <span class="hint" style="display:inline;">(optional — uses collection order as episode source)</span></label>
+          <div id="tv-collection-tags" class="filter-tags"><span class="hint">Connect to Plex to load collections</span></div>
+        </div>
+        <div class="form-row">
+          <label>Genre Filter <span class="hint" style="display:inline;">(optional)</span></label>
+          <div id="tv-genre-tags" class="filter-tags">
+            <div class="filter-tag" data-val="Action">Action</div><div class="filter-tag" data-val="Animation">Animation</div>
+            <div class="filter-tag" data-val="Comedy">Comedy</div><div class="filter-tag" data-val="Crime">Crime</div>
+            <div class="filter-tag" data-val="Documentary">Documentary</div><div class="filter-tag" data-val="Drama">Drama</div>
+            <div class="filter-tag" data-val="Family">Family</div><div class="filter-tag" data-val="Fantasy">Fantasy</div>
+            <div class="filter-tag" data-val="Horror">Horror</div><div class="filter-tag" data-val="Mystery">Mystery</div>
+            <div class="filter-tag" data-val="Reality">Reality</div><div class="filter-tag" data-val="Sci-Fi">Sci-Fi</div>
+            <div class="filter-tag" data-val="Thriller">Thriller</div>
+          </div>
+        </div>
+        <div class="form-row">
+          <label>Label Filter <span class="hint" style="display:inline;">(optional)</span></label>
+          <div id="tv-label-tags" class="filter-tags"><span class="hint">Connect to Plex to load labels</span></div>
+        </div>
+        <div class="form-grid">
+          <div class="form-row">
+            <label>Decade</label>
+            <select id="tv-decade">
+              <option value="">Any</option><option value="1950">1950s</option><option value="1960">1960s</option>
+              <option value="1970">1970s</option><option value="1980">1980s</option><option value="1990">1990s</option>
+              <option value="2000">2000s</option><option value="2010">2010s</option><option value="2020">2020s</option>
+            </select>
+          </div>
+          <div class="form-row">
+            <label>Max Content Rating</label>
+            <select id="tv-max-rating">
+              <option value="">Any Rating</option>
+              <option value="TV-Y">TV-Y</option><option value="TV-G">TV-G</option>
+              <option value="TV-PG">TV-PG</option><option value="TV-14">TV-14</option>
+              <option value="TV-MA">TV-MA</option>
+            </select>
+          </div>
+        </div>
+        <div class="form-grid">
+          <div class="form-row">
+            <label>Episode Order</label>
+            <select id="tv-order">
+              <option value="sequential">Sequential (S01E01, S01E02…)</option>
+              <option value="random">Random Shuffle</option>
+            </select>
+          </div>
+          <div class="form-row"><label>Max Episodes (0 = all)</label><input id="tv-max" type="number" value="0" min="0"/></div>
+        </div>
+        <div class="section-title">BROADCAST HOURS</div>
+        <div class="form-row">
+          <label>On-Air Hours</label>
+          <div id="tv-broadcast-hours" class="hour-grid"></div>
+        </div>
+        <div class="form-row">
+          <label>Off-Air Library</label>
+          <div id="tv-offair-lib-tags" class="filter-tags"><span class="hint">Connect to Plex first</span></div>
+        </div>
+        <div class="section-title">SPECIAL PROGRAMMING</div>
+        <div class="form-grid">
+          <div class="form-row">
+            <label>10 PM PSA Slot</label>
+            <select id="tv-psa-mode">
+              <option value="none">Disabled</option>
+              <option value="enabled">Enabled — play PSA at 10pm</option>
+            </select>
+          </div>
+          <div class="form-row">
+            <label>PSA Library</label>
+            <div id="tv-psa-lib-tags" class="filter-tags"><span class="hint">Connect to Plex first</span></div>
+          </div>
+        </div>
+        <div class="section-title">COMMERCIALS (OPTIONAL)</div>
+        <div class="form-grid">
+          <div class="form-row">
+            <label>Commercials Library</label>
+            <div id="tv-comm-lib-tags" class="filter-tags"><span class="hint">No commercial libraries found</span></div>
+          </div>
+          <div class="form-row">
+            <label>Insert Commercials</label>
+            <select id="tv-comm-mode" onchange="toggleCommInterval('tv')">
+              <option value="none">Disabled</option>
+              <option value="between">Between Each Episode</option>
+              <option value="count">Every X Episodes</option>
+            </select>
+          </div>
+        </div>
+        <div class="form-row" id="tv-comm-interval-row" style="display:none;">
+          <label>Insert After Every <span class="hint" style="display:inline;">episodes</span></label>
+          <input id="tv-comm-interval" type="number" value="1" min="1" max="20"/>
+        </div>
+        <div class="form-row" id="tv-comm-dur-row" style="display:none;">
+          <label>Number of Spots <span class="hint" style="display:inline;">per break</span></label>
+          <input id="tv-comm-duration" type="number" value="2" min="1" max="10"/>
+        </div>
+        <div class="info-box">
+          <div class="info-title">ℹ TV CHANNELS</div>
+          TV channels interleave episodes so no show plays back-to-back. Sequential mode plays in air-date order per show.
+        </div>
+        <div style="display:flex;justify-content:flex-end;margin-top:8px;">
+          <button class="btn cyan" onclick="requirePin('addTV')">+ ADD TV CHANNEL</button>
+        </div>
+      </div>
+
+      <!-- ── ADD MARATHON TV CHANNEL TAB ── -->
+      <div id="tab-marathon-tv" class="tab-panel">
+        <div class="form-grid">
+          <div class="form-row"><label>Channel Number</label><input id="mtv-num" type="number" placeholder="e.g. 30" min="1" max="999"/></div>
+          <div class="form-row"><label>Channel Name</label><input id="mtv-name" type="text" placeholder="e.g. Trek Marathon"/></div>
+        </div>
+        <div class="form-row">
+          <label>Source Libraries</label>
+          <div id="mtv-lib-tags" class="filter-tags"><span class="hint">Connect to Plex first</span></div>
+        </div>
+        <div class="form-row">
+          <label>Collection <span class="hint" style="display:inline;">(optional — plays collection items as the marathon source)</span></label>
+          <div id="mtv-collection-tags" class="filter-tags"><span class="hint">Connect to Plex to load collections</span></div>
+        </div>
+        <div class="form-row">
+          <label>Genre Filter <span class="hint" style="display:inline;">(optional — narrows which shows can be selected)</span></label>
+          <div id="mtv-genre-tags" class="filter-tags">
+            <div class="filter-tag" data-val="Action">Action</div><div class="filter-tag" data-val="Animation">Animation</div>
+            <div class="filter-tag" data-val="Comedy">Comedy</div><div class="filter-tag" data-val="Crime">Crime</div>
+            <div class="filter-tag" data-val="Documentary">Documentary</div><div class="filter-tag" data-val="Drama">Drama</div>
+            <div class="filter-tag" data-val="Family">Family</div><div class="filter-tag" data-val="Fantasy">Fantasy</div>
+            <div class="filter-tag" data-val="Horror">Horror</div><div class="filter-tag" data-val="Mystery">Mystery</div>
+            <div class="filter-tag" data-val="Reality">Reality</div><div class="filter-tag" data-val="Sci-Fi">Sci-Fi</div>
+            <div class="filter-tag" data-val="Thriller">Thriller</div>
+          </div>
+        </div>
+        <div class="form-row">
+          <label>Label Filter <span class="hint" style="display:inline;">(optional)</span></label>
+          <div id="mtv-label-tags" class="filter-tags"><span class="hint">Connect to Plex to load labels</span></div>
+        </div>
+        <div class="form-grid">
+          <div class="form-row">
+            <label>Decade</label>
+            <select id="mtv-decade">
+              <option value="">Any</option><option value="1950">1950s</option><option value="1960">1960s</option>
+              <option value="1970">1970s</option><option value="1980">1980s</option><option value="1990">1990s</option>
+              <option value="2000">2000s</option><option value="2010">2010s</option><option value="2020">2020s</option>
+            </select>
+          </div>
+          <div class="form-row">
+            <label>Max Content Rating</label>
+            <select id="mtv-max-rating">
+              <option value="">Any Rating</option><option value="TV-Y">TV-Y</option><option value="TV-G">TV-G</option>
+              <option value="TV-PG">TV-PG</option><option value="TV-14">TV-14</option><option value="TV-MA">TV-MA</option>
+            </select>
+          </div>
+        </div>
+        <div class="form-row">
+          <label>Min Audience Rating <span class="hint" style="display:inline;">(0 = any)</span></label>
+          <input id="mtv-min-rating" type="number" min="0" max="10" step="0.5" value="0" style="width:80px;"/>
+        </div>
+        <div class="info-box" style="margin:8px 0;">
+          <div class="info-title">ℹ MARATHON TV</div>
+          Plays one entire series at a time in order (S01E01→finale), then picks a new series matching your filters and repeats. Each week a different show marathon runs.
+        </div>
+        <div style="text-align:right;margin-top:12px;">
+          <button class="btn green" onclick="requirePin('addMarathonTV')">+ ADD MARATHON TV CHANNEL</button>
+        </div>
+      </div>
+
+      <!-- ── ADD MARATHON MOVIE CHANNEL TAB ── -->
+      <div id="tab-marathon-movie" class="tab-panel">
+        <div class="form-grid">
+          <div class="form-row"><label>Channel Number</label><input id="mmv-num" type="number" placeholder="e.g. 31" min="1" max="999"/></div>
+          <div class="form-row"><label>Channel Name</label><input id="mmv-name" type="text" placeholder="e.g. Bond Marathon"/></div>
+        </div>
+        <div class="form-row">
+          <label>Source Libraries</label>
+          <div id="mmv-lib-tags" class="filter-tags"><span class="hint">Connect to Plex first</span></div>
+        </div>
+        <div class="form-row">
+          <label>Plex Collection <span class="hint" style="display:inline;">(optional — pick one to use as the marathon playlist)</span></label>
+          <div id="mmv-collection-tags" class="filter-tags"><span class="hint">Connect to Plex to load collections</span></div>
+        </div>
+        <div class="form-row">
+          <label>Genre Filter <span class="hint" style="display:inline;">(used if no collection selected)</span></label>
+          <div id="mmv-genre-tags" class="filter-tags">
+            <div class="filter-tag" data-val="Action">Action</div><div class="filter-tag" data-val="Adventure">Adventure</div>
+            <div class="filter-tag" data-val="Animation">Animation</div><div class="filter-tag" data-val="Comedy">Comedy</div>
+            <div class="filter-tag" data-val="Crime">Crime</div><div class="filter-tag" data-val="Documentary">Documentary</div>
+            <div class="filter-tag" data-val="Drama">Drama</div><div class="filter-tag" data-val="Family">Family</div>
+            <div class="filter-tag" data-val="Fantasy">Fantasy</div><div class="filter-tag" data-val="Horror">Horror</div>
+            <div class="filter-tag" data-val="Mystery">Mystery</div><div class="filter-tag" data-val="Romance">Romance</div>
+            <div class="filter-tag" data-val="Sci-Fi">Sci-Fi</div><div class="filter-tag" data-val="Thriller">Thriller</div>
+          </div>
+        </div>
+        <div class="form-grid">
+          <div class="form-row">
+            <label>Decade</label>
+            <select id="mmv-decade">
+              <option value="">Any</option><option value="1950">1950s</option><option value="1960">1960s</option>
+              <option value="1970">1970s</option><option value="1980">1980s</option><option value="1990">1990s</option>
+              <option value="2000">2000s</option><option value="2010">2010s</option><option value="2020">2020s</option>
+            </select>
+          </div>
+          <div class="form-row">
+            <label>Max Content Rating</label>
+            <select id="mmv-max-rating">
+              <option value="">Any Rating</option><option value="G">G</option><option value="PG">PG</option>
+              <option value="PG-13">PG-13</option><option value="R">R</option><option value="NC-17">NC-17</option>
+            </select>
+          </div>
+        </div>
+        <div class="info-box" style="margin:8px 0;">
+          <div class="info-title">ℹ MARATHON MOVIE</div>
+          Plays through a Plex collection in order, then loops. If no collection is selected, picks from your filtered library. Great for franchise marathons (Bond, Marvel, Star Wars, etc.).
+        </div>
+        <div style="text-align:right;margin-top:12px;">
+          <button class="btn green" onclick="requirePin('addMarathonMovie')">+ ADD MARATHON MOVIE CHANNEL</button>
+        </div>
+      </div>
+    </div>
+    <div class="modal-footer" style="flex-direction:column;align-items:stretch;gap:8px;">
+      <div style="display:flex;align-items:center;gap:10px;padding-top:8px;border-top:1px solid var(--border);">
+        <label style="font-size:10px;color:var(--text-dim);letter-spacing:2px;white-space:nowrap;">ADMIN PIN</label>
+        <input id="new-pin-input" type="password" placeholder="New 4+ digit PIN" maxlength="8" style="width:150px;text-align:center;letter-spacing:4px;"/>
+        <button class="btn cyan btn-sm" onclick="saveAdminPin()">SAVE PIN</button>
+        <span style="font-size:10px;color:var(--text-dim);">Set 0000 to disable</span>
+      </div>
+      <div style="display:flex;justify-content:flex-end;">
+        <button class="btn" onclick="closeAdmin()">CLOSE</button>
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- PIN MODAL -->
+<div id="pin-modal" class="hidden">
+  <div id="pin-box">
+    <h2>🔒 ADMIN</h2>
+    <p>ENTER PIN TO SAVE CHANGES</p>
+    <div id="pin-dots">
+      <div class="pin-dot" id="pd0"></div><div class="pin-dot" id="pd1"></div>
+      <div class="pin-dot" id="pd2"></div><div class="pin-dot" id="pd3"></div>
+    </div>
+    <div id="pin-keypad">
+      <button class="pin-key" onclick="pinKey('1')">1</button>
+      <button class="pin-key" onclick="pinKey('2')">2</button>
+      <button class="pin-key" onclick="pinKey('3')">3</button>
+      <button class="pin-key" onclick="pinKey('4')">4</button>
+      <button class="pin-key" onclick="pinKey('5')">5</button>
+      <button class="pin-key" onclick="pinKey('6')">6</button>
+      <button class="pin-key" onclick="pinKey('7')">7</button>
+      <button class="pin-key" onclick="pinKey('8')">8</button>
+      <button class="pin-key" onclick="pinKey('9')">9</button>
+      <button class="pin-key" onclick="pinKey('back')">&#9003;</button>
+      <button class="pin-key" onclick="pinKey('0')">0</button>
+      <button class="pin-key" onclick="pinKey('cancel')">&#10005;</button>
+    </div>
+    <div id="pin-error"></div>
+  </div>
+</div>
+
+<div id="toast"></div>
+
+<script>
+'use strict';
+
+// ══════════════════════════════════════════
+// STATE
+// ══════════════════════════════════════════
+const S = {
+  plexUrl:'', plexToken:'',
+  connected:false,
+  favorites:new Set(),
+  favFilterActive:false,
+  pipActive:false,
+  hlsSessionId:null,
+  libraries:[],
+  selectedLibKeys:[],
+  allMovies:[], allEpisodes:[], allCommercials:[],
+  channels:[], guide:{},
+  currentChannel:null, currentProgram:null,
+  viewStartMs:0, guideWindowHours:6,
+  playerInterval:null, nextShowTimeout:null, fsClockInterval:null,
+  soundUnlocked:false,
+  ffmpegAvailable:false,
+  adminPin:'1234',
+};
+const mvGenres=new Set(), tvGenres=new Set();
+const mvLibs=new Set(),   tvLibs=new Set();
+const mvLabels=new Set(), tvLabels=new Set();
+const SLOT_MINS=30;
+const SLOT_PX = window.innerWidth <= 768 ? 80 : 200;
+let pendingPlayback=null, lastValidTime=0;
+
+// ══════════════════════════════════════════
+// SERVER PERSISTENCE
+// ══════════════════════════════════════════
+async function apiGet(p){
+  const controller=new AbortController();
+  const t=setTimeout(()=>controller.abort(),8000);
+  try{ const r=await fetch(p,{signal:controller.signal}); clearTimeout(t); return r.json(); }
+  catch(e){ clearTimeout(t); throw e; }
+}
+async function apiPost(p,b){
+  try{ await fetch(p,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(b)}); }catch(e){}
+}
+
+async function loadServerState(){
+  try {
+    const d = await apiGet('/api/state');
+    if(d.config){
+      S.plexUrl = d.config.plexUrl||'';
+      S.plexToken = d.config.plexToken||'';
+      S.selectedLibKeys = d.config.selectedLibKeys||[];
+      if(d.config.adminPin) S.adminPin=d.config.adminPin;
+      if(d.config.favorites) loadFavorites(d.config.favorites);
+    }
+    if(d.channels&&d.channels.length) S.channels=d.channels;
+    if(d.guide&&Object.keys(d.guide).length){
+      const migratedGuide={};
+      for(const [k,v] of Object.entries(d.guide)){
+        if(!Array.isArray(v)||!v.length) continue;
+        if(k.includes('_w')){ migratedGuide[k]=v; continue; }
+        // Old format: key is just the channel id — find which channel and tag with date key
+        // Use the start timestamp of first entry to derive the week Monday
+        const firstStart=v[0]?.start;
+        if(firstStart){
+          const entryDate=new Date(firstStart);
+          entryDate.setHours(0,0,0,0);
+          const dow=entryDate.getDay()||7;
+          entryDate.setDate(entryDate.getDate()-(dow-1)); // back to Monday
+          const dateKey=k+'_w'+entryDate.toISOString().slice(0,10);
+          migratedGuide[dateKey]=v;
+        } else {
+          migratedGuide[k+'_w_legacy']=v;
+        }
+      }
+      S.guide=migratedGuide;
+    }
+  } catch(e){
+    console.warn('Server not available, using localStorage fallback');
+    const sv=JSON.parse(localStorage.getItem('retrocast')||'{}');
+    if(sv.plexUrl){ S.plexUrl=sv.plexUrl; S.plexToken=sv.plexToken; S.selectedLibKeys=sv.selectedLibKeys||[]; }
+    if(sv.favorites) loadFavorites(sv.favorites);
+    if(sv.channels) S.channels=sv.channels;
+    if(sv.guide){
+      const mg={};
+      for(const [k,v] of Object.entries(sv.guide)){
+        if(!Array.isArray(v)||!v.length) continue;
+        if(k.includes('_w')){ mg[k]=v; continue; }
+        const firstStart=v[0]?.start;
+        if(firstStart){
+          const ed=new Date(firstStart); ed.setHours(0,0,0,0);
+          const dow=ed.getDay()||7; ed.setDate(ed.getDate()-(dow-1));
+          mg[k+'_w'+ed.toISOString().slice(0,10)]=v;
+        } else { mg[k+'_w_legacy']=v; }
+      }
+      S.guide=mg;
+    }
+  }
+}
+
+async function persistConfig(){
+  const cfg={plexUrl:S.plexUrl,plexToken:S.plexToken,selectedLibKeys:S.selectedLibKeys,adminPin:S.adminPin};
+  try{ await apiPost('/api/config',cfg); }catch(e){}
+  const sv=JSON.parse(localStorage.getItem('retrocast')||'{}');
+  localStorage.setItem('retrocast',JSON.stringify({...sv,...cfg}));
+}
+async function persistChannels(){
+  try{ await apiPost('/api/channels',{channels:S.channels}); }catch(e){}
+  const sv=JSON.parse(localStorage.getItem('retrocast')||'{}');
+  localStorage.setItem('retrocast',JSON.stringify({...sv,channels:S.channels}));
+}
+async function persistGuide(){
+  try{ await apiPost('/api/guide',{guide:S.guide}); }catch(e){}
+  const sv=JSON.parse(localStorage.getItem('retrocast')||'{}');
+  localStorage.setItem('retrocast',JSON.stringify({...sv,guide:S.guide}));
+}
+
+// ══════════════════════════════════════════
+// INIT
+// ══════════════════════════════════════════
+window.addEventListener('DOMContentLoaded', async()=>{
+  startClock();
+  startStaticNoise();
+
+  try{ await loadServerState(); }catch(e){ console.warn('loadServerState failed',e); }
+  // Check if ffmpeg is available on the server
+  try{
+    const r=await fetch('/api/ffmpeg-available');
+    const d=await r.json();
+    S.ffmpegAvailable=d.available;
+    console.log('[RetroCast] ffmpeg available:',S.ffmpegAvailable);
+  }catch(e){ S.ffmpegAvailable=false; }
+
+  document.getElementById('setup-url').value   = S.plexUrl||'';
+  document.getElementById('setup-token').value = S.plexToken||'';
+  initGuideView();
+  renderGuide();
+  renderChannelsList();
+
+  if(S.plexUrl&&S.plexToken){
+    connectPlex(true);
+    // Check every 6 hours that 2 weeks of schedule exist
+    setInterval(()=>ensureScheduleCurrent(), 6*60*60*1000);
+  } else {
+    showToast('ENTER SERVER DETAILS — ⚙ CONNECT');
+  }
+
+  // Re-render guide on resize (SLOT_PX changes between mobile/desktop)
+  let _resizeTimer;
+  window.addEventListener('resize', ()=>{
+    clearTimeout(_resizeTimer);
+    _resizeTimer = setTimeout(()=>{ renderGuide(); initGuideView(); }, 200);
+  });
+});
+
+// ══════════════════════════════════════════
+// CLOCK
+// ══════════════════════════════════════════
+function startClock(){
+  const tick=()=>{
+    const n=new Date();
+    document.getElementById('clock').textContent=n.toLocaleTimeString('en-US',{hour:'numeric',minute:'2-digit',second:'2-digit',hour12:true}).replace(' AM',' AM').replace(' PM',' PM');
+    document.getElementById('date-display').textContent=n.toLocaleDateString('en-US',{weekday:'short',month:'short',day:'numeric',year:'numeric'}).toUpperCase();
+    updateTimeNeedle();
+    updateCellStates();
+    autoAdvanceGuide();
+  };
+  tick(); setInterval(tick,1000);
+}
+
+// Auto-advance viewStartMs so NOW stays visible without a page refresh.
+// Only kicks in if the user hasn't manually scrolled in the last 5 minutes.
+let _lastUserScroll = 0;
+function markUserScroll(){ _lastUserScroll = Date.now(); }
+
+function autoAdvanceGuide(){
+  // Don't interrupt the user if they scrolled recently
+  if(Date.now() - _lastUserScroll < 5 * 60 * 1000) return;
+
+  const nowMs = Date.now();
+  const windowMs = S.guideWindowHours * 2 * SLOT_MINS * 60 * 1000;
+  const nowOffsetMs = nowMs - S.viewStartMs;
+
+  // If NOW has drifted past the right 25% of the window, or is behind the left edge,
+  // smoothly reposition so NOW sits at ~25% from the left (matching goToNow)
+  const rightEdge  = windowMs * 0.75;
+  const leftEdge   = 0;
+
+  if(nowOffsetMs > rightEdge || nowOffsetMs < leftEdge){
+    S.viewStartMs = nowMs - 1.5 * 3600 * 1000; // same as goToNow
+    renderTimeHeader();
+    renderGuide();
+  }
+}
+
+// ══════════════════════════════════════════
+// PLEX API
+// ══════════════════════════════════════════
+async function plexFetch(path){
+  const sep=path.includes('?')?'&':'?';
+  const url=`${S.plexUrl}${path}${sep}X-Plex-Token=${S.plexToken}`;
+  const r=await fetch(url,{headers:{Accept:'application/json'}});
+  if(!r.ok) throw new Error(`Plex HTTP ${r.status}`);
+  return r.json();
+}
+
+async function connectPlex(silent=false){
+  const url=document.getElementById('setup-url').value.trim().replace(/\/$/,'');
+  const token=document.getElementById('setup-token').value.trim();
+  if(!url||!token){ showToast('ENTER SERVER URL AND TOKEN'); return; }
+  S.plexUrl=url; S.plexToken=token;
+  if(!silent) showToast('CONNECTING...');
+  try{
+    const d=await plexFetch('/library/sections');
+    S.libraries=(d.MediaContainer.Directory||[])
+      .filter(x=>x.type==='movie'||x.type==='show')
+      .map(x=>({key:x.key,title:x.title,type:x.type}));
+    setConnected(true);
+
+    // Default select all if nothing was saved
+    if(!S.selectedLibKeys.length) S.selectedLibKeys=S.libraries.map(l=>l.key);
+
+    renderLibraryList();
+    document.getElementById('libraries-section').style.display='block';
+    document.getElementById('btn-save-load').style.display='inline-block';
+    renderAllLibTags(); loadLabels();
+
+    if(!silent){
+      showToast(`✓ FOUND ${S.libraries.length} LIBRARIES — SELECT THEN SAVE`);
+    } else {
+      await loadAllMedia(true);
+      setTimeout(ensureScheduleCurrent, 500);
+    }
+  }catch(e){
+    setConnected(false);
+    console.error(e);
+    if(!silent) showToast(`✗ FAILED: ${e.message}`);
+    else showToast('AUTO-CONNECT FAILED — CHECK ⚙ CONNECT');
+  }
+}
+
+async function loadAllMedia(silent=false){
+  if(!S.connected) return;
+  if(!silent) showToast('LOADING MEDIA — PLEASE WAIT...');
+  S.allMovies=[]; S.allEpisodes=[]; S.allCommercials=[];
+
+  for(const lib of S.libraries.filter(l=>S.selectedLibKeys.includes(l.key))){
+    try{
+      const d=await plexFetch(`/library/sections/${lib.key}/all?X-Plex-Container-Start=0&X-Plex-Container-Size=50000`);
+      const items=d.MediaContainer.Metadata||[];
+      if(lib.type==='movie'){
+        const isComm=/commercial/i.test(lib.title);
+        items.forEach(m=>{m._libKey=lib.key;m._libTitle=lib.title;m._isComm=isComm;});
+        S.allMovies.push(...items);
+        if(isComm) S.allCommercials.push(...items);
+      } else {
+        for(const show of items){
+          try{
+            const ed=await plexFetch(`/library/metadata/${show.ratingKey}/allLeaves`);
+            (ed.MediaContainer.Metadata||[]).forEach(ep=>{
+              ep._showTitle=show.title;
+              ep._labels=(ep.Label||show.Label||[]).map(l=>l.tag||l.title||'');
+              ep._showRating=show.audienceRating||show.rating||null;
+              ep._showGenres=(show.Genre||[]).map(g=>g.tag);
+              ep._showYear=show.year||null;
+              ep._libKey=lib.key; ep._libTitle=lib.title;
+              S.allEpisodes.push(ep);
+            });
+          }catch(e){ console.warn('Episodes failed for',show.title); }
+        }
+      }
+    }catch(e){ console.warn('Library failed',lib.title,e); }
+  }
+
+  const msg=`✓ ${S.allMovies.length} MOVIES · ${S.allEpisodes.length} EPISODES · ${S.allCommercials.length} COMMERCIALS`;
+  showToast(msg);
+  renderLibFilterTags();
+  renderChannelsList();
+  renderGuide();
+  cacheMarathonCollections();
+  // Only auto-build if there's no saved guide — don't reshuffle on reconnect
+  const hasGuide = S.channels.length && S.channels.some(ch=>getChannelSchedule(ch.id).length>0);
+  if(S.channels.length && !hasGuide) buildGuide();
+}
+
+async function saveAndLoadMedia(){
+  await persistConfig();
+  await loadAllMedia(false);
+  closeSetup();
+}
+
+// Apply active state to scanlines button on load
+document.addEventListener('DOMContentLoaded', () => {
+  const scanlinesOff = localStorage.getItem('retrocast-scanlines') === 'off';
+  const btn = document.getElementById('btn-scanlines');
+  if(btn) btn.classList.toggle('active', !scanlinesOff);
+});
+
+function setConnected(v){
+  S.connected=v;
+  document.getElementById('conn-dot').classList.toggle('connected',v);
+  document.getElementById('conn-label').textContent=v?'ONLINE':'OFFLINE';
+  document.getElementById('server-display').textContent=v?S.plexUrl:'NOT CONNECTED';
+  document.getElementById('server-display').style.color=v?'var(--cyan)':'var(--red)';
+}
+
+// ══════════════════════════════════════════
+// LIBRARY UI
+// ══════════════════════════════════════════
+function renderLibraryList(){
+  document.getElementById('library-list').innerHTML=S.libraries.map(l=>`
+    <label class="lib-check">
+      <input type="checkbox" data-key="${l.key}" ${S.selectedLibKeys.includes(l.key)?'checked':''} onchange="toggleLib('${l.key}',this.checked)"/>
+      <span class="lib-check-label">${l.title}</span>
+      <span class="lib-check-type">${l.type==='movie'?'🎬 MOVIES':'📺 TV SHOWS'}</span>
+    </label>`).join('');
+}
+function toggleLib(key,checked){
+  if(checked){if(!S.selectedLibKeys.includes(key))S.selectedLibKeys.push(key);}
+  else S.selectedLibKeys=S.selectedLibKeys.filter(k=>k!==key);
+}
+function renderLibFilterTags(){
+  // Movie channel lib tags
+  const mvEl=document.getElementById('mv-lib-tags');
+  const mLibs=S.libraries.filter(l=>l.type==='movie'&&S.selectedLibKeys.includes(l.key)&&!/commercial/i.test(l.title));
+  mvEl.innerHTML=mLibs.length
+    ? mLibs.map(l=>`<div class="filter-tag${mvLibs.has(l.key)?' active':''}" data-key="${l.key}" onclick="toggleMvLib('${l.key}',this)">${l.title}</div>`).join('')
+    : '<span class="hint">No movie libraries</span>';
+
+  // TV channel lib tags
+  const tvEl=document.getElementById('tv-lib-tags');
+  const tLibs=S.libraries.filter(l=>l.type==='show'&&S.selectedLibKeys.includes(l.key));
+  tvEl.innerHTML=tLibs.length
+    ? tLibs.map(l=>`<div class="filter-tag${tvLibs.has(l.key)?' active':''}" data-key="${l.key}" onclick="toggleTvLib('${l.key}',this)">${l.title}</div>`).join('')
+    : '<span class="hint">No TV libraries</span>';
+
+  // Marathon TV lib tags (same as TV libs)
+  const mtvEl=document.getElementById('mtv-lib-tags');
+  if(mtvEl) mtvEl.innerHTML=tLibs.length
+    ? tLibs.map(l=>`<div class="filter-tag" data-key="${l.key}" onclick="this.classList.toggle('active')">${l.title}</div>`).join('')
+    : '<span class="hint">No TV libraries</span>';
+
+  // Marathon Movie lib tags
+  const mmvEl=document.getElementById('mmv-lib-tags');
+  if(mmvEl) mmvEl.innerHTML=mLibs.length
+    ? mLibs.map(l=>`<div class="filter-tag" data-key="${l.key}" onclick="this.classList.toggle('active')">${l.title}</div>`).join('')
+    : '<span class="hint">No movie libraries</span>';
+
+  // Marathon Movie collections (load async)
+  loadAllCollections();
+
+  // Commercials library tags (movie-type libs with "commercial" in name)
+  const commLibs=S.libraries.filter(l=>l.type==='movie'&&/commercial/i.test(l.title)&&S.selectedLibKeys.includes(l.key));
+  const commHtml=commLibs.length
+    ? commLibs.map(l=>`<div class="filter-tag" data-key="${l.key}" onclick="toggleCommLib(this)">${l.title}</div>`).join('')
+    : '<span class="hint">No Commercials library found — add one in Plex named "Commercials" then reconnect</span>';
+  const mvCommEl=document.getElementById('mv-comm-lib-tags');
+  const tvCommEl=document.getElementById('tv-comm-lib-tags');
+  if(mvCommEl) mvCommEl.innerHTML=commHtml;
+  if(tvCommEl) tvCommEl.innerHTML=commHtml;
+}
+
+// Load Plex collections for marathon movie channel
+async function loadAllCollections(){
+  if(!S.connected) return;
+  try{
+    const mLibs=S.libraries.filter(l=>l.type==='movie'&&S.selectedLibKeys.includes(l.key)&&!/commercial/i.test(l.title));
+    const tLibs=S.libraries.filter(l=>l.type==='show'&&S.selectedLibKeys.includes(l.key));
+    const mvCollections=[], tvCollections=[];
+
+    for(const lib of mLibs){
+      try{
+        const d=await plexFetch('/library/sections/'+lib.key+'/collections');
+        (d?.MediaContainer?.Metadata||[]).forEach(c=>mvCollections.push({...c,_libKey:lib.key,_libType:'movie'}));
+      }catch(e){}
+    }
+    for(const lib of tLibs){
+      try{
+        const d=await plexFetch('/library/sections/'+lib.key+'/collections');
+        (d?.MediaContainer?.Metadata||[]).forEach(c=>tvCollections.push({...c,_libKey:lib.key,_libType:'show'}));
+      }catch(e){}
+    }
+
+    S.allCollections=[...mvCollections,...tvCollections];
+    S.mvCollections=mvCollections;
+    S.tvCollections=tvCollections;
+
+    const mvHtml=mvCollections.length
+      ? mvCollections.map(c=>`<div class="filter-tag" data-key="${c.ratingKey}" data-lib="${c._libKey}" onclick="selectSingle(this)">${c.title}</div>`).join('')
+      : '<span class="hint">No collections found</span>';
+    const tvHtml=tvCollections.length
+      ? tvCollections.map(c=>`<div class="filter-tag" data-key="${c.ratingKey}" data-lib="${c._libKey}" onclick="selectSingle(this)">${c.title}</div>`).join('')
+      : '<span class="hint">No collections found</span>';
+    const allHtml=S.allCollections.length
+      ? S.allCollections.map(c=>`<div class="filter-tag" data-key="${c.ratingKey}" data-lib="${c._libKey}" onclick="selectSingle(this)">${c.title}</div>`).join('')
+      : '<span class="hint">No collections found</span>';
+
+    // Populate all collection pickers
+    ['mv-collection-tags','mmv-collection-tags'].forEach(id=>{
+      const el=document.getElementById(id); if(el) el.innerHTML=mvHtml;
+    });
+    ['tv-collection-tags','mtv-collection-tags'].forEach(id=>{
+      const el=document.getElementById(id); if(el) el.innerHTML=tvHtml;
+    });
+
+    console.log(`[RetroCast] Collections loaded: ${mvCollections.length} movie, ${tvCollections.length} TV`);
+  }catch(e){
+    console.warn('Collections load failed',e);
+  }
+}
+// Keep old name as alias for any legacy calls
+function loadCollectionsForMarathon(){ return loadAllCollections(); }
+function toggleMvLib(k,el){ el.classList.toggle('active'); if(el.classList.contains('active'))mvLibs.add(k);else mvLibs.delete(k); }
+function toggleTvLib(k,el){ el.classList.toggle('active'); if(el.classList.contains('active'))tvLibs.add(k);else tvLibs.delete(k); }
+
+// ══════════════════════════════════════════
+// CHANNELS
+// ══════════════════════════════════════════
+function readMvForm(existingId){
+  const commMode=document.getElementById('mv-comm-mode').value;
+  const commLibKey=document.querySelector('#mv-comm-lib-tags .filter-tag.active')?.dataset.key||null;
+  const offairLibKey=document.querySelector('#mv-offair-lib-tags .filter-tag.active')?.dataset.key||null;
+  const broadcastHours=getCheckedHours('mv-broadcast-hours');
+  const collectionKey=document.querySelector('#mv-collection-tags .filter-tag.active')?.dataset.key||null;
+  return {
+    id:existingId||Date.now().toString(), type:'movie',
+    number:parseInt(document.getElementById('mv-num').value),
+    name:document.getElementById('mv-name').value.trim(),
+    libKeys:[...mvLibs], genres:[...mvGenres], labels:[...mvLabels],
+    collectionKey,
+    decade:document.getElementById('mv-decade').value,
+    maxRating:document.getElementById('mv-max-rating').value||null,
+    sort:document.getElementById('mv-sort').value,
+    maxItems:parseInt(document.getElementById('mv-max').value)||0,
+    broadcastHours, offairLibKey,
+    commercials:{ mode:commMode, libKey:commLibKey,
+      interval:parseInt(document.getElementById('mv-comm-interval').value)||1,
+      breakCount:parseInt(document.getElementById('mv-comm-duration').value)||2 },
+  };
+}
+function addMovieChannel(){
+  const num=parseInt(document.getElementById('mv-num').value);
+  const name=document.getElementById('mv-name').value.trim();
+  if(!num||!name){ showToast('ENTER CHANNEL NUMBER AND NAME'); return; }
+  if(S.channels.find(c=>c.number===num)){ showToast('CHANNEL NUMBER EXISTS'); return; }
+  S.channels.push(readMvForm());
+  S.channels.sort((a,b)=>a.number-b.number);
+  persistChannels(); renderChannelsList(); resetMvForm();
+  showToast(`CH ${num} ADDED: ${name}`);
+  document.querySelector('[data-panel="tab-channels"]').click();
+}
+function readTvForm(existingId){
+  const collectionKey=document.querySelector('#tv-collection-tags .filter-tag.active')?.dataset.key||null;
+  const commMode=document.getElementById('tv-comm-mode').value;
+  const commLibKey=document.querySelector('#tv-comm-lib-tags .filter-tag.active')?.dataset.key||null;
+  const offairLibKey=document.querySelector('#tv-offair-lib-tags .filter-tag.active')?.dataset.key||null;
+  const psaLibKey=document.querySelector('#tv-psa-lib-tags .filter-tag.active')?.dataset.key||null;
+  const broadcastHours=getCheckedHours('tv-broadcast-hours');
+  return {
+    id:existingId||Date.now().toString(), type:'tv',
+    number:parseInt(document.getElementById('tv-num').value),
+    collectionKey,
+    name:document.getElementById('tv-name').value.trim(),
+    libKeys:[...tvLibs], genres:[...tvGenres], labels:[...tvLabels],
+    decade:document.getElementById('tv-decade').value,
+    maxRating:document.getElementById('tv-max-rating').value||null,
+    order:document.getElementById('tv-order').value,
+    maxItems:parseInt(document.getElementById('tv-max').value)||0,
+    broadcastHours, offairLibKey,
+    psa:{ mode:document.getElementById('tv-psa-mode').value, libKey:psaLibKey },
+    commercials:{ mode:commMode, libKey:commLibKey,
+      interval:parseInt(document.getElementById('tv-comm-interval').value)||1,
+      breakCount:parseInt(document.getElementById('tv-comm-duration').value)||2 },
+  };
+}
+function addTVChannel(){
+  const num=parseInt(document.getElementById('tv-num').value);
+  const name=document.getElementById('tv-name').value.trim();
+  if(!num||!name){ showToast('ENTER CHANNEL NUMBER AND NAME'); return; }
+  if(S.channels.find(c=>c.number===num)){ showToast('CHANNEL NUMBER EXISTS'); return; }
+  S.channels.push(readTvForm());
+  S.channels.sort((a,b)=>a.number-b.number);
+  persistChannels(); renderChannelsList(); resetTvForm();
+  showToast(`CH ${num} ADDED: ${name}`);
+  document.querySelector('[data-panel="tab-channels"]').click();
+}
+// ══════════════════════════════════════════
+// MARATHON CHANNELS
+// ══════════════════════════════════════════
+
+function readMarathonTVForm(existingId){
+  return {
+    id: existingId||Date.now().toString(),
+    type: 'marathon-tv',
+    collectionKey: document.querySelector('#mtv-collection-tags .filter-tag.active')?.dataset.key||null,
+    number: parseInt(document.getElementById('mtv-num').value),
+    name: document.getElementById('mtv-name').value.trim(),
+    libKeys: [...document.querySelectorAll('#mtv-lib-tags .filter-tag.active')].map(t=>t.dataset.key),
+    genres:  [...document.querySelectorAll('#mtv-genre-tags .filter-tag.active')].map(t=>t.dataset.val),
+    labels:  [...document.querySelectorAll('#mtv-label-tags .filter-tag.active')].map(t=>t.dataset.val),
+    decade:  document.getElementById('mtv-decade').value,
+    maxRating: document.getElementById('mtv-max-rating').value||null,
+    minRating: parseFloat(document.getElementById('mtv-min-rating').value)||0,
+  };
+}
+
+function addMarathonTVChannel(){
+  const num=parseInt(document.getElementById('mtv-num').value);
+  const name=document.getElementById('mtv-name').value.trim();
+  if(!num||!name){ showToast('ENTER CHANNEL NUMBER AND NAME'); return; }
+  if(S.channels.find(c=>c.number===num)){ showToast('CHANNEL NUMBER EXISTS'); return; }
+  S.channels.push(readMarathonTVForm());
+  S.channels.sort((a,b)=>a.number-b.number);
+  persistChannels(); renderChannelsList();
+  showToast(`CH ${num} MARATHON TV ADDED: ${name}`);
+  document.querySelector('[data-panel="tab-channels"]').click();
+}
+
+function readMarathonMovieForm(existingId){
+  const collectionEl=document.querySelector('#mmv-collection-tags .filter-tag.active');
+  return {
+    id: existingId||Date.now().toString(),
+    type: 'marathon-movie',
+    number: parseInt(document.getElementById('mmv-num').value),
+    name: document.getElementById('mmv-name').value.trim(),
+    libKeys: [...document.querySelectorAll('#mmv-lib-tags .filter-tag.active')].map(t=>t.dataset.key),
+    collectionKey: collectionEl?.dataset.key||null,
+    genres: [...document.querySelectorAll('#mmv-genre-tags .filter-tag.active')].map(t=>t.dataset.val),
+    decade: document.getElementById('mmv-decade').value,
+    maxRating: document.getElementById('mmv-max-rating').value||null,
+  };
+}
+
+function addMarathonMovieChannel(){
+  const num=parseInt(document.getElementById('mmv-num').value);
+  const name=document.getElementById('mmv-name').value.trim();
+  if(!num||!name){ showToast('ENTER CHANNEL NUMBER AND NAME'); return; }
+  if(S.channels.find(c=>c.number===num)){ showToast('CHANNEL NUMBER EXISTS'); return; }
+  S.channels.push(readMarathonMovieForm());
+  S.channels.sort((a,b)=>a.number-b.number);
+  persistChannels(); renderChannelsList();
+  showToast(`CH ${num} MARATHON MOVIE ADDED: ${name}`);
+  document.querySelector('[data-panel="tab-channels"]').click();
+}
+
+// Get all shows matching a marathon-tv channel's filters
+function getMarathonShowPool(ch){
+  let episodes=[...S.allEpisodes];
+  if(ch._tempCollOverride){
+    episodes=episodes.filter(e=>ch._tempCollOverride.has(e._showTitle));
+  } else {
+    if(ch.libKeys&&ch.libKeys.length) episodes=episodes.filter(e=>ch.libKeys.includes(e._libKey));
+  }
+  if(ch.labels&&ch.labels.length)   episodes=episodes.filter(e=>(e._labels||[]).some(l=>ch.labels.includes(l)));
+  if(ch.maxRating)  episodes=episodes.filter(e=>ratingAllowed(e.contentRating||e._showRating||'',ch.maxRating,'tv'));
+  if(ch.genres&&ch.genres.length)   episodes=episodes.filter(e=>ch.genres.some(g=>(e._showGenres||[]).includes(g)));
+  if(ch.decade){ const d=parseInt(ch.decade); episodes=episodes.filter(e=>(e._showYear||e.year||0)>=d&&(e._showYear||e.year||0)<d+10); }
+  if(ch.minRating){ const r=parseFloat(ch.minRating); episodes=episodes.filter(e=>(e._showRating||0)>=r); }
+
+  // Group by show
+  const showMap={};
+  for(const ep of episodes){
+    const key=ep._showTitle||'unknown';
+    if(!showMap[key]) showMap[key]=[];
+    showMap[key].push(ep);
+  }
+  // Sort each show's episodes in order
+  for(const key of Object.keys(showMap)){
+    showMap[key].sort((a,b)=>((a.parentIndex||0)-(b.parentIndex||0))||((a.index||0)-(b.index||0)));
+  }
+  return showMap; // { showTitle: [ep, ep, ...], ... }
+}
+
+// Get movies for marathon-movie channel (collection or filtered library)
+async function getMarathonMovieList(ch){
+  // If a collection is specified, fetch it from Plex
+  if(ch.collectionKey){
+    try{
+      const d=await plexFetch('/library/collections/'+ch.collectionKey+'/children');
+      const items=d?.MediaContainer?.Metadata||[];
+      items.forEach(m=>{m._libKey=ch.collectionKey;});
+      return items; // already in collection order
+    }catch(e){ console.warn('Collection fetch failed',e); }
+  }
+  // Fallback: filtered library
+  let items=[...S.allMovies].filter(m=>!m._isComm);
+  if(ch.libKeys&&ch.libKeys.length) items=items.filter(m=>ch.libKeys.includes(m._libKey));
+  if(ch.genres&&ch.genres.length)   items=items.filter(m=>{const g=(m.Genre||[]).map(x=>x.tag);return ch.genres.some(cg=>g.includes(cg));});
+  if(ch.decade){const d=parseInt(ch.decade);items=items.filter(m=>m.year>=d&&m.year<d+10);}
+  if(ch.maxRating) items=items.filter(m=>ratingAllowed(m.contentRating||'',ch.maxRating,'movie'));
+  // Sort by year ascending (oldest first) for natural marathon order
+  items.sort((a,b)=>(a.year||0)-(b.year||0));
+  return items;
+}
+
+function resetMvForm(){ ['mv-num','mv-name','mv-rating','mv-comm-interval','mv-comm-duration'].forEach(id=>{const el=document.getElementById(id);if(el)el.value=''}); document.getElementById('mv-decade').value=''; document.getElementById('mv-sort').value='random'; document.getElementById('mv-max').value='0'; document.getElementById('mv-comm-mode').value='none'; document.getElementById('mv-comm-interval-row').style.display='none'; document.getElementById('mv-comm-dur-row').style.display='none'; mvGenres.clear(); mvLibs.clear(); mvLabels.clear(); renderHourGrid('mv-broadcast-hours',Array.from({length:24},(_,i)=>i)); document.querySelectorAll('#mv-genre-tags .filter-tag,#mv-lib-tags .filter-tag,#mv-comm-lib-tags .filter-tag').forEach(t=>t.classList.remove('active')); }
+function resetTvForm(){ ['tv-num','tv-name','tv-max','tv-rating','tv-comm-interval','tv-comm-duration'].forEach(id=>{const el=document.getElementById(id);if(el)el.value=''}); document.getElementById('tv-order').value='sequential'; document.getElementById('tv-decade').value=''; document.getElementById('tv-comm-mode').value='none'; document.getElementById('tv-comm-interval-row').style.display='none'; document.getElementById('tv-comm-dur-row').style.display='none'; tvGenres.clear(); tvLibs.clear(); tvLabels.clear(); renderHourGrid('tv-broadcast-hours',Array.from({length:24},(_,i)=>i)); document.querySelectorAll('#tv-genre-tags .filter-tag,#tv-lib-tags .filter-tag,#tv-comm-lib-tags .filter-tag').forEach(t=>t.classList.remove('active')); }
+function deleteChannel(id){ S.channels=S.channels.filter(c=>c.id!==id); Object.keys(S.guide).filter(k=>k.startsWith(id+'_')).forEach(k=>delete S.guide[k]); persistChannels(); renderChannelsList(); renderGuide(); showToast('CHANNEL REMOVED'); }
+function renderChannelsList(){
+  const el=document.getElementById('channels-list'); if(!el)return;
+  if(!S.channels.length){ el.innerHTML='<div class="empty-msg">NO CHANNELS YET — USE + MOVIE OR + TV TABS</div>'; return; }
+  el.innerHTML=S.channels.map(ch=>{
+    const builtWeeks=Object.keys(S.guide).filter(k=>k.startsWith(ch.id+'_')&&S.guide[k].length>0).length;
+    const hours=ch.broadcastHours&&ch.broadcastHours.length<24?ch.broadcastHours.length+'h/day':' 24h';
+    const ratingStr=ch.maxRating?' · Max:'+ch.maxRating:'';
+    return `<div class="channel-item">
+      <div class="channel-item-num">${ch.number}</div>
+      <div class="ch-type-badge ${ch.type}">${
+        ch.type==='movie'?'🎬 MOVIE':
+        ch.type==='marathon-tv'?'📺 MARATHON TV':
+        ch.type==='marathon-movie'?'🎬 MARATHON MOVIE':'📺 TV'}</div>
+      <div class="channel-item-info">
+        <div class="channel-item-name">${ch.name}</div>
+        <div class="channel-item-desc">${ch.genres&&ch.genres.length?ch.genres.join(', '):'All Genres'}${ch.decade?' · '+ch.decade+'s':''}${ratingStr} · ${hours}${builtWeeks?' · '+builtWeeks+' wk':' · not built'}</div>
+      </div>
+      <div class="channel-item-actions">
+        <button class="btn btn-sm" onclick="editChannel('${ch.id}')" title="Edit">✎</button>
+        <button class="btn btn-sm cyan" onclick="requirePin('rebuildCh:${ch.id}')" title="Rebuild Schedule">↺</button>
+        <button class="btn btn-sm danger" onclick="requirePin('delete:${ch.id}')" title="Delete">✕</button>
+      </div>
+    </div>`;
+  }).join('');
+}
+
+// ══════════════════════════════════════════
+// GUIDE BUILDING
+// ══════════════════════════════════════════
+function buildPlaylist(ch){
+  if(ch.type==='movie'){
+    // If a collection is selected, use it directly (in collection order)
+    if(ch.collectionKey && S._collectionCache && S._collectionCache[ch.collectionKey]){
+      let items=[...S._collectionCache[ch.collectionKey]];
+      if(ch.maxItems>0) items=items.slice(0,ch.maxItems);
+      return items;
+    }
+    let items=[...S.allMovies].filter(m=>!m._isComm); // exclude commercials from movie channels
+    if(ch.libKeys&&ch.libKeys.length) items=items.filter(m=>ch.libKeys.includes(m._libKey));
+    if(ch.labels&&ch.labels.length)   items=items.filter(m=>(m._labels||[]).some(l=>ch.labels.includes(l)));
+    if(ch.genres&&ch.genres.length)   items=items.filter(m=>{const g=(m.Genre||[]).map(x=>x.tag);return ch.genres.some(cg=>g.includes(cg));});
+    if(ch.decade){const d=parseInt(ch.decade);items=items.filter(m=>m.year>=d&&m.year<d+10);}
+    if(ch.minRating){const r=parseFloat(ch.minRating);items=items.filter(m=>(m.audienceRating||m.rating||0)>=r);}
+    if(ch.maxRating) items=items.filter(m=>ratingAllowed(m.contentRating||'',ch.maxRating,'movie'));
+    switch(ch.sort){
+      case 'rating':   items.sort((a,b)=>(b.audienceRating||b.rating||0)-(a.audienceRating||a.rating||0)); break;
+      case 'year':     items.sort((a,b)=>b.year-a.year); break;
+      case 'year_asc': items.sort((a,b)=>a.year-b.year); break;
+      case 'title':    items.sort((a,b)=>a.title.localeCompare(b.title)); break;
+      default:         items=shuffle(items);
+    }
+    if(ch.maxItems>0) items=items.slice(0,ch.maxItems);
+    return items;
+  } else {
+    // ── TV: interleave episodes so no show plays back-to-back ──
+    // If a collection is selected, use only episodes from shows in that collection
+    let episodes=[...S.allEpisodes];
+    if(ch.collectionKey && S._collectionCache && S._collectionCache[ch.collectionKey]){
+      const showTitles=new Set(S._collectionCache[ch.collectionKey].map(s=>s.title));
+      episodes=episodes.filter(e=>showTitles.has(e._showTitle));
+    } else {
+      if(ch.libKeys&&ch.libKeys.length) episodes=episodes.filter(e=>ch.libKeys.includes(e._libKey));
+    }
+    if(ch.labels&&ch.labels.length)   episodes=episodes.filter(e=>(e._labels||[]).some(l=>ch.labels.includes(l)));
+    if(ch.maxRating) episodes=episodes.filter(e=>ratingAllowed(e.contentRating||e._showRating||'',ch.maxRating,'tv'));
+    if(ch.genres&&ch.genres.length)   episodes=episodes.filter(e=>ch.genres.some(g=>(e._showGenres||[]).includes(g)));
+    if(ch.decade){ const d=parseInt(ch.decade); episodes=episodes.filter(e=>{ const y=e._showYear||e.year||0; return y>=d&&y<d+10; }); }
+    if(ch.minRating){ const r=parseFloat(ch.minRating); episodes=episodes.filter(e=>(e._showRating||0)>=r); }
+
+    // Group episodes by show
+    const showMap={};
+    for(const ep of episodes){
+      const key=ep._showTitle||'unknown';
+      if(!showMap[key]) showMap[key]=[];
+      showMap[key].push(ep);
+    }
+    // Sort each show's episodes
+    for(const key of Object.keys(showMap)){
+      if(ch.order==='sequential'){
+        showMap[key].sort((a,b)=>{ const sd=(a.parentIndex||0)-(b.parentIndex||0); return sd||((a.index||0)-(b.index||0)); });
+      } else {
+        showMap[key]=shuffle(showMap[key]);
+      }
+    }
+    // Interleave: round-robin across shows so no show is back-to-back
+    const showQueues=Object.values(showMap);
+    const interleaved=[];
+    let maxLen=Math.max(...showQueues.map(q=>q.length));
+    for(let i=0;i<maxLen;i++){
+      for(const queue of showQueues){
+        if(i<queue.length) interleaved.push(queue[i]);
+      }
+    }
+    if(ch.maxItems>0) return interleaved.slice(0,ch.maxItems);
+    return interleaved;
+  }
+}
+
+// Build a pool of commercials from a given library key
+function getCommercialPool(libKey){
+  if(!libKey) return shuffle([...S.allCommercials]);
+  return shuffle(S.allMovies.filter(m=>m._libKey===libKey&&m._isComm));
+}
+
+// ── Helper: week key based on the Monday date of a given week ────────────────
+// weekOffset: 0 = current/this week, 1 = next week
+function getMondayOf(weekOffset){
+  const d=new Date(); d.setHours(0,0,0,0);
+  const dow=d.getDay()||7; // 1=Mon..7=Sun
+  d.setDate(d.getDate()-(dow-1)+(weekOffset*7)); // go to Monday of that week
+  return d;
+}
+function dateToWeekKey(d){
+  // e.g. "w2026-02-24"
+  return 'w'+d.toISOString().slice(0,10);
+}
+function getWeekKey(chId, weekOffset){
+  return chId+'_'+dateToWeekKey(getMondayOf(weekOffset));
+}
+function getWeekStart(weekOffset){ return getMondayOf(weekOffset); }
+// Which 2 week offsets we manage: this week (0) and next week (1)
+function getManagedWeekOffsets(){ return [0,1]; }
+
+// ── Build a single channel's schedule for one week ────────────────────────────
+function buildChannelWeek(ch, weekStartMs){
+  // Marathon channels have their own build logic
+  if(ch.type==='marathon-tv')   return buildMarathonTVWeek(ch, weekStartMs);
+  if(ch.type==='marathon-movie') return buildMarathonMovieWeek(ch, weekStartMs);
+
+  const items=buildPlaylist(ch);
+  if(!items.length) return [];
+
+  const weekEndMs=weekStartMs+7*24*60*60*1000;
+  const comm=ch.commercials||{mode:'none'};
+  let commPool=comm.mode!=='none'?getCommercialPool(comm.libKey):[];
+  let commPoolIdx=0;
+  const breakCount=(comm.breakCount||2);       // number of spots per break
+  const breakEvery=(comm.interval||1);         // insert break every N content items
+
+  // Off-air pool
+  const offairPool=ch.offairLibKey?S.allMovies.filter(m=>m._libKey===ch.offairLibKey):[];
+  let offairIdx=0;
+
+  // PSA pool (TV only)
+  const psaPool=(ch.type==='tv'&&ch.psa?.mode==='enabled'&&ch.psa?.libKey)
+    ?S.allMovies.filter(m=>m._libKey===ch.psa.libKey):[];
+  let psaIdx=0;
+
+  // Broadcast hours: array of ints 0-23, empty = all 24h
+  const onAirHours=ch.broadcastHours&&ch.broadcastHours.length?new Set(ch.broadcastHours):null;
+
+  function isOnAir(tsMs){
+    if(!onAirHours) return true;
+    return onAirHours.has(new Date(tsMs).getHours());
+  }
+
+  function insertBreak(sched,cur){
+    if(!commPool.length) return cur;
+    // Reshuffle when we're near the end of the pool to avoid repeats
+    if(commPoolIdx+breakCount >= commPool.length){
+      // Reshuffle remaining pool but keep last played spot at end so it
+      // doesn't appear first in the next break
+      const lastSpot = commPool[(commPoolIdx-1+commPool.length)%commPool.length];
+      let remaining = commPool.slice(commPoolIdx);
+      const fresh = shuffle(commPool.filter(s=>s!==lastSpot));
+      // Replace pool with freshly shuffled, ensuring lastSpot isn't first
+      commPool.length = 0;
+      commPool.push(...fresh);
+      commPoolIdx = 0;
+    }
+    // Pick breakCount unique spots — if pool smaller than breakCount, wrap safely
+    const picked = new Set();
+    let attempts = 0;
+    for(let i=0;i<breakCount;i++){
+      // Advance past any spot we already picked this break
+      while(picked.has(commPoolIdx % commPool.length) && attempts < commPool.length){
+        commPoolIdx++; attempts++;
+      }
+      const spot=commPool[commPoolIdx%commPool.length]; commPoolIdx++;
+      picked.add((commPoolIdx-1) % commPool.length);
+      const dur=spot.duration||30000;
+      sched.push({title:spot.title,start:cur,duration:dur,
+        plexKey:spot.key,ratingKey:spot.ratingKey,itemType:'commercial',
+        contentRating:'',rating:null,summary:''});
+      cur+=dur;
+    }
+    return cur;
+  }
+
+  const sched=[]; let cur=weekStartMs, contentIdx=0, contentSinceBreak=0;
+  let psaPlayedToday=-1; // track which day PSA was played
+
+  while(cur<weekEndMs){
+    const hourOfDay=new Date(cur).getHours();
+
+    // ── OFF-AIR: channel not broadcasting this hour ──
+    if(!isOnAir(cur)){
+      if(offairPool.length){
+        const vid=offairPool[offairIdx%offairPool.length]; offairIdx++;
+        const dur=vid.duration||(30*60*1000);
+        sched.push({title:vid.title,start:cur,duration:dur,
+          plexKey:vid.key,ratingKey:vid.ratingKey,itemType:'offair',
+          contentRating:'',rating:null,summary:'OFF AIR'});
+        cur+=dur;
+      } else {
+        // skip to next hour
+        const next=new Date(cur); next.setHours(next.getHours()+1,0,0,0);
+        cur=next.getTime();
+      }
+      continue;
+    }
+
+    // ── 10 PM PSA slot (TV channels) ──
+    if(ch.type==='tv'&&ch.psa?.mode==='enabled'&&psaPool.length&&hourOfDay===22){
+      const today=new Date(cur).toDateString();
+      if(psaPlayedToday!==today){
+        psaPlayedToday=today;
+        const psa=psaPool[psaIdx%psaPool.length]; psaIdx++;
+        const dur=psa.duration||(60*1000);
+        sched.push({title:psa.title,start:cur,duration:dur,
+          plexKey:psa.key,ratingKey:psa.ratingKey,itemType:'psa',
+          contentRating:'',rating:null,summary:'PUBLIC SERVICE ANNOUNCEMENT'});
+        cur+=dur; continue;
+      }
+    }
+
+    // ── REGULAR CONTENT ──
+    const item=items[contentIdx%items.length]; contentIdx++;
+    const dur=item.duration||(ch.type==='tv'?1800000:7200000);
+    const entry=ch.type==='movie'?{
+      title:item.title,start:cur,duration:dur,
+      plexKey:item.key,ratingKey:item.ratingKey,
+      year:item.year,rating:item.audienceRating||item.rating||null,
+      contentRating:item.contentRating||'',summary:item.summary||'',itemType:'movie',
+    }:{
+      title:`${item._showTitle} — ${item.title}`,
+      showTitle:item._showTitle,displayTitle:item.title,
+      season:item.parentIndex,episode:item.index,
+      start:cur,duration:dur,
+      plexKey:item.key,ratingKey:item.ratingKey,
+      rating:item._showRating,contentRating:item.contentRating||'',
+      summary:item.summary||'',itemType:'tv',
+    };
+    sched.push(entry);
+    cur+=dur; contentSinceBreak++;
+
+    if(comm.mode==='between'&&commPool.length){
+      cur=insertBreak(sched,cur); contentSinceBreak=0;
+    } else if(comm.mode==='count'&&commPool.length&&contentSinceBreak>=breakEvery){
+      cur=insertBreak(sched,cur); contentSinceBreak=0;
+    }
+  }
+  return sched;
+}
+
+// ── Build one or all weeks ────────────────────────────────────────────────────
+async function buildGuide(weekOffsets){
+  if(!S.connected){showToast('CONNECT TO PLEX FIRST');return;}
+  const offsets=weekOffsets||getManagedWeekOffsets();
+  const label=offsets.length===2?'THIS WEEK + NEXT WEEK':'WEEK '+(offsets.map(o=>o===0?'CURRENT':'NEXT').join(','));
+  showToast('BUILDING '+label+'...');
+
+  for(const wo of offsets){
+    const wStart=getWeekStart(wo).getTime();
+    for(const ch of S.channels){
+      S.guide[getWeekKey(ch.id,wo)]=buildChannelWeek(ch,wStart);
+    }
+  }
+  await persistGuide();
+  renderScheduleStatus();
+  renderGuide();
+  showToast(`✓ BUILT — ${S.channels.length} CHANNELS × ${offsets.length} WEEKS`);
+}
+
+async function saveAndBuild(){
+  if(!S.connected){showToast('CONNECT FIRST');return;}
+  await buildGuide();
+  closeAdmin();
+}
+
+// Auto-ensure 2 weeks of data: called on startup and periodically
+async function ensureScheduleCurrent(){
+  if(!S.connected||!S.channels.length) return;
+  const missing=getManagedWeekOffsets().filter(wo=>{
+    return !S.channels.some(ch=>S.guide[getWeekKey(ch.id,wo)]?.length>0);
+  });
+  if(missing.length>0){
+    console.log('[RetroCast] Auto-building missing weeks:',missing);
+    await buildGuide(missing);
+  }
+}
+
+// ── Flatten guide for a given channel (merge all weeks) ───────────────────────
+// ── Marathon TV Week Builder ──────────────────────────────────────────────────
+// Plays one entire show at a time, then picks a new one from the pool
+// Rebuild schedule for a single channel only
+async function rebuildSingleChannel(chId){
+  const ch=S.channels.find(c=>c.id===chId);
+  if(!ch){ showToast('CHANNEL NOT FOUND'); return; }
+
+  showToast(`↺ REBUILDING CH ${ch.number}: ${ch.name}...`);
+
+  // Delete existing guide entries for this channel
+  for(const key of Object.keys(S.guide)){
+    if(key.startsWith(ch.id+'_')) delete S.guide[key];
+  }
+
+  // Cache collection if marathon movie
+  if(ch.type==='marathon-movie'&&ch.collectionKey){
+    try{
+      const items=await getMarathonMovieList(ch);
+      
+      S._collectionCache[ch.collectionKey]=items;
+    }catch(e){ console.warn('[Marathon] Collection cache failed',e); }
+  }
+
+  // Rebuild all managed weeks for this channel
+  let built=0;
+  for(const wo of getManagedWeekOffsets()){
+    const ws=getWeekStart(wo);
+    const sched=buildChannelWeek(ch, ws.getTime());
+    if(sched.length){
+      S.guide[getWeekKey(ch.id,wo)]=sched;
+      built++;
+    }
+  }
+
+  // Save and refresh
+  await fetch('/api/guide',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({guide:S.guide})});
+  renderGuide();
+  renderChannelsList();
+  renderScheduleStatus();
+  showToast(`✓ CH ${ch.number} REBUILT: ${built} week${built!==1?'s':''}`);
+}
+
+function buildMarathonTVWeek(ch, weekStartMs){
+  // If collection set, use only shows from that collection
+  if(ch.collectionKey && S._collectionCache && S._collectionCache[ch.collectionKey]){
+    const collShows=S._collectionCache[ch.collectionKey];
+    const showTitles=new Set(collShows.map(s=>s.title));
+    // Override libKeys filter - use collection as source
+    const origLibKeys=ch.libKeys;
+    ch._tempCollOverride=showTitles;
+  }
+  const showMap=getMarathonShowPool(ch);
+  if(ch._tempCollOverride){ delete ch._tempCollOverride; }
+  const showTitles=Object.keys(showMap);
+  if(!showTitles.length) return [];
+
+  const weekEndMs=weekStartMs+7*24*60*60*1000;
+  const sched=[]; let cur=weekStartMs;
+
+  // Determine which show to start with based on a stable week seed
+  // Use week offset from epoch so different weeks pick different shows
+  const weekIdx=Math.floor(weekStartMs/(7*24*60*60*1000));
+  let showQueueIdx=weekIdx%showTitles.length;
+  // Sort titles so order is deterministic
+  showTitles.sort();
+
+  while(cur<weekEndMs){
+    const title=showTitles[showQueueIdx%showTitles.length];
+    const episodes=showMap[title];
+
+    // Determine which episode to start from within this show
+    // (carry forward from previous iteration by tracking total runtime)
+    let epIdx=0;
+    for(const ep of episodes){
+      const dur=ep.duration||ep.Media?.[0]?.duration||(22*60*1000);
+      sched.push({
+        title:`${ep._showTitle} — ${ep.title||'Episode'}`,
+        start:cur, duration:dur,
+        plexKey:ep.key, ratingKey:ep.ratingKey,
+        itemType:'episode',
+        contentRating:ep.contentRating||ep._showRating||'',
+        rating:ep._showRating||null,
+        year:ep._showYear||null,
+        summary:ep.summary||'',
+        showTitle:ep._showTitle,
+        seasonNum:ep.parentIndex, episodeNum:ep.index,
+      });
+      cur+=dur;
+      if(cur>=weekEndMs) break;
+    }
+    // Move to next show
+    showQueueIdx++;
+  }
+  return sched;
+}
+
+// ── Marathon Movie Week Builder ───────────────────────────────────────────────
+// Plays through the movie list in order, looping
+function buildMarathonMovieWeek(ch, weekStartMs){
+  // For movie marathon we need the list - but it might require async collection fetch
+  // Use cached list if available, otherwise use filtered library
+  let items;
+  if(ch.collectionKey && S._marathonCollectionCache && S._collectionCache[ch.collectionKey]){
+    items=S._collectionCache[ch.collectionKey];
+  } else {
+    // Fallback: filtered library sorted by year
+    items=[...S.allMovies].filter(m=>!m._isComm);
+    if(ch.libKeys&&ch.libKeys.length) items=items.filter(m=>ch.libKeys.includes(m._libKey));
+    if(ch.genres&&ch.genres.length)   items=items.filter(m=>{const g=(m.Genre||[]).map(x=>x.tag);return ch.genres.some(cg=>g.includes(cg));});
+    if(ch.decade){const d=parseInt(ch.decade);items=items.filter(m=>m.year>=d&&m.year<d+10);}
+    if(ch.maxRating) items=items.filter(m=>ratingAllowed(m.contentRating||'',ch.maxRating,'movie'));
+    items.sort((a,b)=>(a.year||0)-(b.year||0));
+  }
+  if(!items.length) return [];
+
+  const weekEndMs=weekStartMs+7*24*60*60*1000;
+  const sched=[]; let cur=weekStartMs;
+
+  // Determine start position based on week index (cycles through)
+  const weekIdx=Math.floor(weekStartMs/(7*24*60*60*1000));
+  let movieIdx=weekIdx%items.length;
+
+  while(cur<weekEndMs){
+    const movie=items[movieIdx%items.length]; movieIdx++;
+    const dur=movie.duration||(120*60*1000);
+    sched.push({
+      title:movie.title,
+      start:cur, duration:dur,
+      plexKey:movie.key, ratingKey:movie.ratingKey,
+      itemType:'movie',
+      contentRating:movie.contentRating||'',
+      rating:movie.audienceRating||movie.rating||null,
+      year:movie.year||null,
+      summary:movie.summary||'',
+    });
+    cur+=dur;
+  }
+  return sched;
+}
+
+// Pre-cache collection contents for all channels that use a collection
+async function cacheMarathonCollections(){
+  if(!S.connected) return;
+  if(!S._collectionCache) S._collectionCache={};
+  // Also keep old key for compatibility
+  if(!S._marathonCollectionCache) S._marathonCollectionCache=S._collectionCache;
+
+  const chsWithCollections=S.channels.filter(c=>c.collectionKey);
+  if(!chsWithCollections.length) return;
+
+  for(const ch of chsWithCollections){
+    const key=ch.collectionKey;
+    if(S._collectionCache[key]) continue; // already cached
+    try{
+      const d=await plexFetch('/library/collections/'+key+'/children');
+      const items=d?.MediaContainer?.Metadata||[];
+      // Sort by collection order index if available
+      items.sort((a,b)=>(a.index||0)-(b.index||0));
+      S._collectionCache[key]=items;
+      // Mirror to old cache key
+      S._marathonCollectionCache[key]=items;
+      console.log(`[Collections] Cached "${ch.name}" collection: ${items.length} items`);
+    }catch(e){ console.warn('[Collections] Cache failed for',ch.name,e); }
+  }
+}
+
+function getChannelSchedule(chId){
+  const prefix=chId+'_';
+  const all=[];
+  for(const [k,v] of Object.entries(S.guide)){
+    if(k.startsWith(prefix)&&Array.isArray(v)) all.push(...v);
+  }
+  return all.sort((a,b)=>a.start-b.start);
+}
+
+
+// ══════════════════════════════════════════
+// GUIDE RENDER
+// ══════════════════════════════════════════
+function initGuideView(){ S.viewStartMs=Date.now()-1.5*3600*1000; renderTimeHeader(); }
+function renderTimeHeader(){
+  const inner=document.getElementById('time-slots-inner'); inner.innerHTML='';
+  for(let i=0;i<S.guideWindowHours*2;i++){
+    const d=new Date(S.viewStartMs+i*SLOT_MINS*60*1000);
+    const el=document.createElement('div'); el.className='time-slot-label';
+    el.textContent=d.toLocaleTimeString('en-US',{hour:'numeric',minute:'2-digit',hour12:true});
+    inner.appendChild(el);
+  }
+  document.getElementById('time-window-label').textContent=new Date(S.viewStartMs).toLocaleTimeString('en-US',{hour:'numeric',minute:'2-digit',hour12:true});
+  updateTimeNeedle();
+}
+function renderGuide(){
+  const grid=document.getElementById('guide-grid'); grid.innerHTML='';
+  const viewEnd=S.viewStartMs+S.guideWindowHours*3600*1000, now=Date.now();
+  if(!S.channels.length){
+    const e=document.createElement('div'); e.className='empty-msg'; e.style.padding='60px';
+    e.textContent='📺 NO CHANNELS — CLICK "CHANNELS" TO ADD SOME';
+    grid.appendChild(e); return;
+  }
+  const visChs=S.favFilterActive?S.channels.filter(c=>S.favorites.has(c.id)):S.channels;
+  if(S.favFilterActive&&visChs.length===0){const e=document.createElement('div');e.className='empty-msg';e.style.padding='40px';e.textContent='★ NO FAVORITES — CLICK ★ ON A CHANNEL TO ADD';grid.appendChild(e);return;}
+  for(const ch of visChs){
+    const row=document.createElement('div'); row.className='guide-row';
+    const lbl=document.createElement('div'); lbl.className='channel-label';
+    const chIcon=ch.type==='movie'?'🎬':ch.type==='marathon-movie'?'🎬🔁':ch.type==='marathon-tv'?'📺🔁':'📺';
+    lbl.innerHTML=`<div class="channel-num">${ch.number}</div><div class="channel-name">${ch.name}</div><div class="channel-genre">${chIcon} ${(ch.genres||[]).slice(0,2).join('/')||'ALL'}${ch.decade?' '+ch.decade+'s':''}</div>`;
+    const star=document.createElement('button');
+    star.className='fav-star'+(S.favorites.has(ch.id)?' active':'');
+    star.textContent='★'; star.title='Favorite';
+    star.addEventListener('click',(e)=>{ e.stopPropagation(); toggleFav(ch.id,star,lbl); });
+    lbl.appendChild(star);
+    if(S.favorites.has(ch.id)) lbl.classList.add('fav-lit');
+    lbl.addEventListener('click',()=>tuneToChannel(ch));
+    row.appendChild(lbl);
+    const pr=document.createElement('div'); pr.className='programs-row';
+    const inner=document.createElement('div'); inner.className='programs-inner'; inner.dataset.channelId=ch.id;
+    inner.style.width=(S.guideWindowHours*2*SLOT_PX)+'px';
+    const sched=getChannelSchedule(ch.id).filter(p=>
+      p.start<viewEnd&&(p.start+p.duration)>S.viewStartMs&&p.itemType!=='commercial');
+    if(!sched.length){
+      const d=document.createElement('div'); d.style.cssText='padding:20px;color:var(--text-dim);font-size:11px;letter-spacing:2px;';
+      d.textContent='NO PROGRAMMING — BUILD GUIDE'; inner.appendChild(d);
+    }
+    for(const prog of sched) inner.appendChild(buildProgCell(prog,ch,now));
+    pr.appendChild(inner); row.appendChild(pr); grid.appendChild(row);
+  }
+  updateTimeNeedle();
+}
+function buildProgCell(prog,ch,now){
+  const cell=document.createElement('div'); cell.className='program-cell';
+  const end=prog.start+prog.duration;
+
+  // Store times as data attrs so the live ticker can update classes without a full re-render
+  cell.dataset.progStart = prog.start;
+  cell.dataset.progEnd   = end;
+
+  const isNow=prog.start<=now&&end>now, isPast=end<=now;
+  if(isNow) cell.classList.add('now-playing');
+  if(isPast) cell.classList.add('past');
+  const _h=new Date(prog.start).getHours(); if(_h>=20&&_h<22) cell.classList.add('primetime');
+  if(prog.itemType==='commercial') cell.classList.add('commercial-cell');
+  cell.style.left=((prog.start-S.viewStartMs)/(SLOT_MINS*60*1000)*SLOT_PX)+'px';
+  cell.style.width=Math.max((prog.duration/(SLOT_MINS*60*1000)*SLOT_PX),40)+'px';
+  const t=new Date(prog.start).toLocaleTimeString('en-US',{hour:'numeric',minute:'2-digit',hour12:true});
+  if(prog.itemType==='commercial'){
+    cell.innerHTML=`${isNow?'<div class="now-badge">NOW</div>':''}<div class="prog-time">${t}</div><div class="prog-title" style="color:var(--amber-dim);font-size:12px;">📺 ${prog.title}</div><div class="prog-info" style="color:var(--amber-dim);">COMMERCIAL</div>`;
+  } else {
+    const ep=prog.itemType==='tv'?`S${String(prog.season||0).padStart(2,'0')}E${String(prog.episode||0).padStart(2,'0')} · `:'';
+    const r=prog.rating?'★'+prog.rating.toFixed(1):'';
+    cell.innerHTML=`${isNow?'<div class="now-badge">NOW</div>':''}<div class="prog-time">${t}</div><div class="prog-title">${prog.title}</div><div class="prog-info">${ep}${prog.year||''} ${r} ${prog.contentRating||''}</div>`;
+  }
+
+  // Progress bar — updated live by ticker
+  if(!prog.itemType || prog.itemType!=='commercial'){
+    const bar=document.createElement('div'); bar.className='prog-progress';
+    if(isNow) bar.style.width=Math.min(100,((now-prog.start)/prog.duration)*100)+'%';
+    cell.appendChild(bar);
+  }
+
+  // Click handler — always based on live clock, not stale render-time now
+  cell.addEventListener('click',()=>{
+    if(Date.now()>=prog.start) tuneToProgram(ch,prog);
+  });
+  cell.style.cursor='pointer';
+
+  return cell;
+}
+
+// Called every second from the clock tick — updates now-playing/past classes
+// and progress bars without rebuilding the DOM
+function updateCellStates(){
+  const nowMs=Date.now();
+  document.querySelectorAll('.program-cell[data-prog-start]').forEach(cell=>{
+    const start=parseFloat(cell.dataset.progStart);
+    const end  =parseFloat(cell.dataset.progEnd);
+    const isNow=start<=nowMs&&end>nowMs;
+    const isPast=end<=nowMs;
+    cell.classList.toggle('now-playing', isNow);
+    cell.classList.toggle('past', isPast);
+    // Future cells are slightly dimmed but still cursor:pointer (click blocked in handler)
+    cell.style.opacity = start>nowMs ? '0.45' : '';
+    // Update progress bar
+    const bar=cell.querySelector('.prog-progress');
+    if(bar && isNow) bar.style.width=Math.min(100,((nowMs-start)/(end-start))*100)+'%';
+    // Update NOW badge
+    let badge=cell.querySelector('.now-badge');
+    if(isNow && !badge){
+      badge=document.createElement('div'); badge.className='now-badge'; badge.textContent='NOW';
+      cell.insertBefore(badge, cell.firstChild);
+    } else if(!isNow && badge){
+      badge.remove();
+    }
+  });
+}
+function updateTimeNeedle(){
+  const n=document.getElementById('time-needle'), offPx=((Date.now()-S.viewStartMs)/(SLOT_MINS*60*1000))*SLOT_PX;
+  if(offPx<0||offPx>S.guideWindowHours*2*SLOT_PX){n.style.display='none';return;}
+  n.style.display='block'; n.style.left=(160+offPx)+'px';
+}
+function shiftTime(h){ markUserScroll(); S.viewStartMs+=h*3600*1000; renderTimeHeader(); renderGuide(); }
+function goToNow()   { _lastUserScroll=0; S.viewStartMs=Date.now()-1.5*3600*1000; renderTimeHeader(); renderGuide(); }
+
+// ══════════════════════════════════════════
+// SOUND — on-player toggle button
+// ══════════════════════════════════════════
+function updateSoundBtn(){
+  const btn=document.getElementById('sound-btn');
+  if(!btn) return;
+  if(S.soundUnlocked){ btn.textContent='🔊 ON'; btn.classList.add('unmuted'); }
+  else               { btn.textContent='🔇 OFF'; btn.classList.remove('unmuted'); }
+}
+function toggleSound(){
+  const video=document.getElementById('video-player');
+  S.soundUnlocked=!S.soundUnlocked;
+  video.muted = !S.soundUnlocked;
+  updateSoundBtn();
+  showToast(S.soundUnlocked ? '🔊 SOUND ON' : '🔇 MUTED');
+}
+
+// ══════════════════════════════════════════
+// PLAYBACK
+// ══════════════════════════════════════════
+function tuneToChannel(ch,stayInPip=false){
+  const now=Date.now();
+  const prog=getChannelSchedule(ch.id).find(p=>p.start<=now&&(p.start+p.duration)>now);
+  if(prog) tuneToProgram(ch,prog,stayInPip); else showToast('NO CURRENT PROGRAM ON THIS CHANNEL');
+}
+
+async function tuneToProgram(ch,prog,stayInPip=false){
+  // Immediately silence audio and stop old stream on channel change
+  const video=document.getElementById('video-player');
+  video.pause();
+  video.muted = true;
+  if(window._hlsInst){ window._hlsInst.destroy(); window._hlsInst=null; }
+  if(S.currentStreamId){
+    fetch('/api/stream/stop',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({id:S.currentStreamId})}).catch(()=>{});
+    S.currentStreamId = null;
+  }
+
+  const wasPip=S.pipActive;
+  if(S.pipActive&&!stayInPip) expandFromPip();
+  else if(S.pipActive&&stayInPip){ leavePip(true); }
+  const now=Date.now();
+  if(S.playerInterval) clearInterval(S.playerInterval);
+  if(S.nextShowTimeout) clearTimeout(S.nextShowTimeout);
+  S.currentChannel=ch; S.currentProgram=prog;
+
+  if(!stayInPip){
+    document.getElementById('player-fullscreen').classList.remove('hidden');
+    _startIdleWatcher();
+  }
+  if(!stayInPip){
+    document.getElementById('fs-static-overlay').classList.remove('hidden'); startStaticNoise();
+  }
+  document.getElementById('fs-click-play').classList.add('hidden');
+
+  document.getElementById('fs-channel-num').textContent=`CH ${ch.number}`;
+
+  document.getElementById('fs-channel-name').textContent=ch.name.toUpperCase();
+  document.getElementById('fs-now-title').textContent=prog.title;
+
+  const meta=[
+    prog.year?`<span>${prog.year}</span>`:'',
+    prog.rating?`<span>★ ${prog.rating.toFixed(1)}</span>`:'',
+    prog.contentRating?`<span>${prog.contentRating}</span>`:'',
+    prog.itemType==='tv'&&prog.season!=null?`<span>S${String(prog.season).padStart(2,'0')}E${String(prog.episode).padStart(2,'0')}</span>`:'',
+    `<span>${formatDuration(prog.duration)}</span>`,
+  ];
+  document.getElementById('fs-now-meta').innerHTML=meta.join('');
+
+  const sched=getChannelSchedule(ch.id), next=sched.find(p=>p.start>=prog.start+prog.duration);
+  document.getElementById('fs-next-title').textContent=next?next.title:'—';
+  document.getElementById('fs-next-time').textContent=next?new Date(next.start).toLocaleTimeString('en-US',{hour:'numeric',minute:'2-digit',hour12:true}):'';
+
+  updateSoundBtn();
+
+  const seekSec=Math.max(0,Math.floor((now-prog.start)/1000));
+  try{
+    const d=await plexFetch(prog.plexKey);
+    const meta0=d.MediaContainer.Metadata[0];
+    const part=meta0.Media[0].Part[0];
+    const audioCodec=(meta0.Media[0].audioCodec||'').toLowerCase();
+    const needsTranscode=!['aac','mp4a','he-aac','flac','alac'].includes(audioCodec);
+    console.log('[RetroCast] audioCodec='+audioCodec+' needsTranscode='+needsTranscode);
+
+    // Direct Plex URL (always works for video, may have no audio if codec unsupported)
+    const directUrl=`${S.plexUrl}${part.key}?X-Plex-Token=${S.plexToken}`;
+
+    let url, finalSeek;
+    if(S.ffmpegAvailable){
+      console.log('[RetroCast] starting HLS session seek='+seekSec);
+      const _r = await fetch(`/api/stream?seek=${seekSec}&url=${encodeURIComponent(directUrl)}`);
+      if(!_r.ok) throw new Error('Stream error: '+_r.status);
+      const _d = await _r.json();
+      S.currentStreamId = _d.id;
+      url = _d.m3u8;
+      finalSeek = 0;
+      console.log('[RetroCast] HLS ready '+url);
+    } else {
+      if(needsTranscode) console.warn('[RetroCast] ffmpeg not available — audio may be silent');
+      url=directUrl;
+      finalSeek=seekSec;
+    }
+    pendingPlayback={url, seekSec:finalSeek, prog, ch};
+    await startPlayback();
+    if(wasPip&&stayInPip){ enterPip(); _populatePipInfo(ch,prog); }
+  }catch(e){
+    showToast(`PLAYBACK ERROR: ${e.message}`);
+    console.error(e);
+  }
+}
+
+async function startPlayback(){
+  if(!pendingPlayback) return;
+  const {url,seekSec,prog,ch}=pendingPlayback;
+  const video=document.getElementById('video-player');
+
+  video.removeEventListener('seeking',onVideoSeeking);
+  document.getElementById('fs-click-play').classList.add('hidden');
+  if(!document.body.classList.contains('pip-active')){
+    document.getElementById('fs-static-overlay').classList.remove('hidden'); startStaticNoise();
+  }
+
+  video.pause();
+  if(window._hlsInstance){ window._hlsInstance.destroy(); window._hlsInstance=null; }
+  if(window._hlsInst){ window._hlsInst.destroy(); window._hlsInst=null; }
+
+  video.volume = 1.0;
+  video.muted  = false;
+
+  if(url.endsWith('.m3u8')){
+    if(window.Hls && Hls.isSupported()){
+      // Chrome/Firefox: use HLS.js
+      if(window._hlsInst){ window._hlsInst.destroy(); window._hlsInst=null; }
+      const hls = new Hls({enableWorker:false, fragLoadingMaxRetry:6, manifestLoadingMaxRetry:6});
+      window._hlsInst = hls;
+      hls.loadSource(url);
+      hls.attachMedia(video);
+    } else {
+      // Safari / WebOS: native HLS support
+      video.src = url;
+    }
+  } else {
+    video.src = url;
+  }
+
+  video.addEventListener('loadedmetadata',()=>{
+    video.muted=false; video.volume=1.0;
+    if(seekSec>0 && video.duration && seekSec<video.duration) video.currentTime=seekSec;
+    lastValidTime=video.currentTime;
+  },{once:true});
+
+  video.addEventListener('playing',()=>{
+    video.muted = false; video.volume = 1.0;
+    if(!S.pipActive){
+      document.getElementById('fs-static-overlay').classList.add('hidden'); stopStaticNoise();
+    }
+    video.muted=false; video.volume=1.0;
+  },{once:true});
+
+  video.addEventListener('seeking', onVideoSeeking);
+
+  try{
+    await video.play();
+    video.muted=false; video.volume=1.0;
+    S.soundUnlocked=true; updateSoundBtn();
+    console.log('[RetroCast] playing muted='+video.muted+' vol='+video.volume);
+  }catch(e){
+    if(e.name==='NotAllowedError'){
+      video.muted=true;
+      try{
+        await video.play();
+        S.soundUnlocked=false; updateSoundBtn();
+        document.getElementById('fs-static-overlay').classList.add('hidden'); stopStaticNoise();
+        document.getElementById('fs-click-play').classList.remove('hidden');
+      }catch(e2){ showToast('PLAYBACK ERROR: '+e2.message); return; }
+    } else { showToast('PLAYBACK ERROR: '+e.message); return; }
+  }
+
+  startProgressTracking(prog,seekSec);
+  scheduleNextShow(ch,prog);
+  startFsClock();
+}
+
+async function handleClickToPlay(){
+  if(!pendingPlayback) return;
+  const video=document.getElementById('video-player');
+  document.getElementById('fs-click-play').classList.add('hidden');
+  video.muted = false;
+  video.volume = 1.0;
+  S.soundUnlocked = true;
+  updateSoundBtn();
+  if(video.paused){
+    try{ await video.play(); }catch(e){ showToast('PLAYBACK FAILED: '+e.message); return; }
+  }
+  document.getElementById('fs-static-overlay').classList.add('hidden'); stopStaticNoise();
+  // Note: startProgressTracking/scheduleNextShow/startFsClock already called by startPlayback
+}
+
+function exitPlayer(){
+  if(S.hlsSessionId){
+    fetch('/api/hls/'+S.hlsSessionId, {method:'DELETE'}).catch(()=>{});
+    S.hlsSessionId=null;
+  }
+  if(S.pipActive) leavePip();
+  _stopIdleWatcher();
+  const v=document.getElementById('video-player');
+  v.pause(); v.src='';
+  v.removeEventListener('seeking',onVideoSeeking);
+  if(S.playerInterval)  clearInterval(S.playerInterval);
+  if(S.nextShowTimeout) clearTimeout(S.nextShowTimeout);
+  if(S.fsClockInterval) clearInterval(S.fsClockInterval);
+  document.getElementById('player-fullscreen').classList.add('hidden');
+  document.getElementById('fs-static-overlay').classList.remove('hidden'); startStaticNoise();
+  pendingPlayback=null; S.currentChannel=null; S.currentProgram=null;
+  renderGuide();
+}
+
+function onVideoSeeking(){
+  const v=document.getElementById('video-player');
+  if(v.currentTime<lastValidTime-2) v.currentTime=lastValidTime;
+}
+
+function startProgressTracking(prog,startSec){
+  const v=document.getElementById('video-player'); lastValidTime=startSec;
+  if(S.playerInterval) clearInterval(S.playerInterval);
+  S.playerInterval=setInterval(()=>{
+    const cur=v.currentTime; if(cur>lastValidTime) lastValidTime=cur;
+    const tot=prog.duration/1000, pct=Math.min(100,(cur/tot)*100);
+    document.getElementById('fs-elapsed').textContent=formatTime(cur);
+    document.getElementById('fs-remaining').textContent='-'+formatTime(Math.max(0,tot-cur));
+    document.getElementById('fs-progress-fill').style.width=pct+'%';
+  },1000);
+}
+
+function scheduleNextShow(ch,prog){
+  const end=prog.start+prog.duration, delay=end-Date.now();
+  if(delay>0&&delay<86400000){
+    S.nextShowTimeout=setTimeout(()=>{
+      const next=getChannelSchedule(ch.id).find(p=>p.start>=end);
+      if(next&&S.currentChannel?.id===ch.id){ showToast(`NOW: ${next.title}`); tuneToProgram(ch,next,S.pipActive); }
+    },delay);
+  }
+}
+
+function startFsClock(){
+  if(S.fsClockInterval) clearInterval(S.fsClockInterval);
+  const tick=()=>{ const el=document.getElementById('fs-clock-display'); if(el)el.textContent=new Date().toLocaleTimeString('en-US',{hour12:false}); };
+  tick(); S.fsClockInterval=setInterval(tick,1000);
+}
+
+// ══════════════════════════════════════════
+// TABS
+// ══════════════════════════════════════════
+function switchTab(tabEl){
+  document.querySelectorAll('.tab').forEach(t=>t.classList.remove('active'));
+  document.querySelectorAll('.tab-panel').forEach(p=>p.classList.remove('active'));
+  tabEl.classList.add('active');
+  document.getElementById(tabEl.dataset.panel).classList.add('active');
+  if(tabEl.dataset.panel==='tab-movie'||tabEl.dataset.panel==='tab-tv') renderLibFilterTags();
+}
+
+// Genre tag delegation
+document.addEventListener('click',e=>{
+  const t=e.target; if(!t.classList.contains('filter-tag')||!t.dataset.val) return;
+  const p=t.closest('#mv-genre-tags,#tv-genre-tags'); if(!p) return;
+  t.classList.toggle('active');
+  const v=t.dataset.val, set=p.id==='mv-genre-tags'?mvGenres:tvGenres;
+  t.classList.contains('active')?set.add(v):set.delete(v);
+});
+
+// ══════════════════════════════════════════
+// MODALS
+// ══════════════════════════════════════════
+function openSetup(){
+  document.getElementById('setup-url').value=S.plexUrl||'';
+  document.getElementById('setup-token').value=S.plexToken||'';
+  if(S.libraries.length){ renderLibraryList(); document.getElementById('libraries-section').style.display='block'; document.getElementById('btn-save-load').style.display='inline-block'; }
+  document.getElementById('setup-modal').classList.remove('hidden');
+}
+function closeSetup(){ document.getElementById('setup-modal').classList.add('hidden'); }
+function openAdmin(){ document.getElementById('admin-modal').classList.remove('hidden'); renderChannelsList(); if(S.connected){renderAllLibTags();loadLabels();} renderScheduleStatus(); }
+function closeAdmin(){ document.getElementById('admin-modal').classList.add('hidden'); }
+document.getElementById('setup-modal').addEventListener('click',e=>{ if(e.target===e.currentTarget)closeSetup(); });
+document.getElementById('admin-modal').addEventListener('click',e=>{ if(e.target===e.currentTarget)closeAdmin(); });
+
+// ══════════════════════════════════════════
+// COMMERCIALS FORM HELPERS
+// ══════════════════════════════════════════
+function toggleCommInterval(prefix){
+  const mode=document.getElementById(`${prefix}-comm-mode`).value;
+  const show=mode!=='none';
+  document.getElementById(`${prefix}-comm-interval-row`).style.display=mode==='count'?'flex':'none';
+  document.getElementById(`${prefix}-comm-dur-row`).style.display=show?'flex':'none';
+}
+// Only allow one commercials lib to be selected at a time (single-select tag)
+function toggleCommLib(el){
+  const container=el.closest('.filter-tags');
+  container.querySelectorAll('.filter-tag').forEach(t=>t!==el&&t.classList.remove('active'));
+  el.classList.toggle('active');
+}
+
+// ══════════════════════════════════════════
+// UTILITIES
+// ══════════════════════════════════════════
+function shuffle(a){ const b=[...a]; for(let i=b.length-1;i>0;i--){const j=Math.floor(Math.random()*(i+1));[b[i],b[j]]=[b[j],b[i]];} return b; }
+function formatTime(s){ s=Math.max(0,Math.floor(s)); return `${String(Math.floor(s/3600)).padStart(2,'0')}:${String(Math.floor((s%3600)/60)).padStart(2,'0')}:${String(s%60).padStart(2,'0')}`; }
+function formatDuration(ms){ const h=Math.floor(ms/3600000),m=Math.floor((ms%3600000)/60000); return h?`${h}h ${m}m`:`${m}m`; }
+function showToast(msg){ const el=document.getElementById('toast'); el.innerHTML=msg; el.classList.add('show'); clearTimeout(el._t); el._t=setTimeout(()=>el.classList.remove('show'),3500); }
+
+// ══════════════════════════════════════════
+// PIN — protects save/change actions only
+// Modals open freely; PIN required to save
+// ══════════════════════════════════════════
+let _pinBuffer = '';
+let _pinTarget = null;
+
+function requirePin(target){
+  // If no pin set or 0000, execute immediately
+  if(!S.adminPin || S.adminPin==='0000'){
+    _executePinTarget(target);
+    return;
+  }
+  _pinBuffer='';
+  _pinTarget=target;
+  updatePinDots();
+  document.getElementById('pin-error').textContent='';
+  document.getElementById('pin-modal').classList.remove('hidden');
+}
+
+function pinKey(k){
+  if(k==='cancel'){ document.getElementById('pin-modal').classList.add('hidden'); _pinBuffer=''; return; }
+  if(k==='back'){ _pinBuffer=_pinBuffer.slice(0,-1); updatePinDots(); return; }
+  if(_pinBuffer.length>=4) return;
+  _pinBuffer+=k;
+  updatePinDots();
+  if(_pinBuffer.length===4) setTimeout(checkPin,120);
+}
+
+function updatePinDots(){
+  for(let i=0;i<4;i++){
+    const d=document.getElementById('pd'+i);
+    if(d) d.classList.toggle('filled', i<_pinBuffer.length);
+  }
+}
+
+function checkPin(){
+  if(_pinBuffer===S.adminPin){
+    document.getElementById('pin-modal').classList.add('hidden');
+    document.getElementById('pin-error').textContent='';
+    _executePinTarget(_pinTarget);
+  } else {
+    document.getElementById('pin-error').textContent='INCORRECT PIN';
+    const box=document.getElementById('pin-box');
+    box.style.transform='translateX(-8px)';
+    setTimeout(()=>{box.style.transform='translateX(8px)';},80);
+    setTimeout(()=>{box.style.transform='';},160);
+    _pinBuffer='';
+    updatePinDots();
+  }
+}
+
+function _executePinTarget(target){
+  if(!target) return;
+  if(target==='open:setup')    openSetup();
+  else if(target==='open:admin')  openAdmin();
+  else if(target==='saveConnect') saveAndLoadMedia();
+  else if(target==='addMovie') addMovieChannel();
+  else if(target==='addTV')          addTVChannel();
+  else if(target==='addMarathonTV')    addMarathonTVChannel();
+  else if(target==='addMarathonMovie') addMarathonMovieChannel();
+  else if(target.startsWith('rebuildCh:')) rebuildSingleChannel(target.split(':')[1]);
+  else if(target==='buildAll') saveAndBuild();
+  else if(target.startsWith('buildWeek:')){ const wo=parseInt(target.slice(10)); buildGuide([wo]); }
+  else if(target.startsWith('saveEdit:')) saveEditChannel(target.slice(9));
+  else if(target.startsWith('delete:')) deleteChannel(target.slice(7));
+}
+
+async function saveAdminPin(){
+  const np=document.getElementById('new-pin-input')?.value?.trim();
+  if(!np||np.length<4||!/^\d+$/.test(np)){ showToast('PIN MUST BE 4+ DIGITS'); return; }
+  S.adminPin=np;
+  try{ await apiPost('/api/config',{plexUrl:S.plexUrl,plexToken:S.plexToken,selectedLibKeys:S.selectedLibKeys,adminPin:np}); }catch(e){}
+  showToast('PIN UPDATED — TAKES EFFECT IMMEDIATELY');
+}
+
+// ══════════════════════════════════════════
+// CHANNEL UP / DOWN
+// ══════════════════════════════════════════
+function channelStep(dir){
+  if(!S.channels.length) return;
+  const sorted=[...S.channels].sort((a,b)=>a.number-b.number);
+  let idx=sorted.findIndex(c=>c.id===S.currentChannel?.id);
+  idx=(idx+dir+sorted.length)%sorted.length;
+  const ch=sorted[idx];
+  const lbl=document.getElementById('fs-ch-label');
+  lbl.textContent='CH '+ch.number;
+  lbl.classList.add('show');
+  setTimeout(()=>lbl.classList.remove('show'),1200);
+  tuneToChannel(ch);
+}
+
+// ══════════════════════════════════════════
+// LABELS / TAGS
+// ══════════════════════════════════════════
+function toggleMvLabel(v,el){ el.classList.toggle('active'); if(el.classList.contains('active'))mvLabels.add(v);else mvLabels.delete(v); }
+function toggleTvLabel(v,el){ el.classList.toggle('active'); if(el.classList.contains('active'))tvLabels.add(v);else tvLabels.delete(v); }
+
+async function loadLabels(){
+  const movieLabels=new Set(), tvLabelSet=new Set();
+  for(const lib of S.libraries){
+    if(!S.selectedLibKeys.includes(lib.key)) continue;
+    if(/commercial/i.test(lib.title)) continue;
+    try{
+      const d=await plexFetch(`/library/sections/${lib.key}/label`);
+      const items=d?.MediaContainer?.Directory||[];
+      items.forEach(item=>{
+        if(lib.type==='movie') movieLabels.add(item.title);
+        else tvLabelSet.add(item.title);
+      });
+    }catch(e){}
+  }
+  const mvEl=document.getElementById('mv-label-tags');
+  if(mvEl) mvEl.innerHTML=movieLabels.size
+    ? [...movieLabels].sort().map(l=>`<div class="filter-tag" data-val="${l}" onclick="toggleMvLabel(this.dataset.val,this)">${l}</div>`).join('')
+    : '<span class="hint">No labels found</span>';
+  const tvEl=document.getElementById('tv-label-tags');
+  if(tvEl) tvEl.innerHTML=tvLabelSet.size
+    ? [...tvLabelSet].sort().map(l=>`<div class="filter-tag" data-val="${l}" onclick="toggleTvLabel(this.dataset.val,this)">${l}</div>`).join('')
+    : '<span class="hint">No labels found</span>';
+
+  // Store for marathon TV label filter
+  S.tvLabels=tvLabelSet;
+  const mtvEl=document.getElementById('mtv-label-tags');
+  if(mtvEl) mtvEl.innerHTML=tvLabelSet.size
+    ? [...tvLabelSet].sort().map(l=>`<div class="filter-tag" data-val="${l}" onclick="this.classList.toggle('active')">${l}</div>`).join('')
+    : '<span class="hint">No labels found</span>';
+}
+
+
+
+// ══════════════════════════════════════════
+// SETTINGS GEAR — dropdown + PIN gate
+// ══════════════════════════════════════════
+function openSettings(){
+  const dd = document.getElementById('settings-dropdown');
+  dd.classList.toggle('hidden');
+  // Close when clicking outside
+  if(!dd.classList.contains('hidden')){
+    setTimeout(()=>{
+      document.addEventListener('click', function _close(e){
+        if(!dd.contains(e.target) && !e.target.closest('[onclick="openSettings()"]')){
+          dd.classList.add('hidden');
+          document.removeEventListener('click', _close);
+        }
+      });
+    }, 50);
+  }
+}
+
+function settingsAction(target){
+  document.getElementById('settings-dropdown').classList.add('hidden');
+  requirePin('open:'+target);
+}
+
+
+
+// ══════════════════════════════════════════
+// PLAYER UI IDLE FADE (15s)
+// ══════════════════════════════════════════
+let _idleTimer = null;
+
+function _resetIdleTimer(){
+  const player = document.getElementById('player-fullscreen');
+  if(!player || player.classList.contains('hidden')) return;
+  player.classList.remove('ui-hidden');
+  clearTimeout(_idleTimer);
+  _idleTimer = setTimeout(()=>{
+    if(!document.getElementById('player-fullscreen').classList.contains('hidden')){
+      document.getElementById('player-fullscreen').classList.add('ui-hidden');
+    }
+  }, 15000);
+}
+
+function _startIdleWatcher(){
+  const player = document.getElementById('player-fullscreen');
+  player.addEventListener('mousemove',  _resetIdleTimer);
+  player.addEventListener('mouseenter', _resetIdleTimer);
+  player.addEventListener('click',      _resetIdleTimer);
+  player.addEventListener('touchstart', _resetIdleTimer, {passive:true});
+  _resetIdleTimer(); // start the countdown immediately
+}
+
+function _stopIdleWatcher(){
+  const player = document.getElementById('player-fullscreen');
+  player.removeEventListener('mousemove',  _resetIdleTimer);
+  player.removeEventListener('mouseenter', _resetIdleTimer);
+  player.removeEventListener('click',      _resetIdleTimer);
+  player.removeEventListener('touchstart', _resetIdleTimer);
+  player.classList.remove('ui-hidden');
+  clearTimeout(_idleTimer);
+}
+
+
+
+// ══════════════════════════════════════════
+// RATING HELPER
+// ══════════════════════════════════════════
+const MOVIE_RATING_ORDER=['G','PG','PG-13','R','NC-17','UNRATED','NR'];
+const TV_RATING_ORDER=['TV-Y','TV-Y7','TV-G','TV-PG','TV-14','TV-MA','UNRATED','NR'];
+function ratingAllowed(itemRating, maxRating, type){
+  if(!maxRating) return true;
+  const order=type==='movie'?MOVIE_RATING_ORDER:TV_RATING_ORDER;
+  const r=(itemRating||'').toUpperCase().trim();
+  const maxIdx=order.indexOf(maxRating.toUpperCase());
+  const itemIdx=order.indexOf(r);
+  if(maxIdx===-1) return true; // unknown max = allow all
+  if(itemIdx===-1) return true; // unknown item rating = allow
+  return itemIdx<=maxIdx;
+}
+
+// ══════════════════════════════════════════
+// HOUR GRID
+// ══════════════════════════════════════════
+function renderHourGrid(containerId, checkedHours){
+  const el=document.getElementById(containerId); if(!el) return;
+  const hours=checkedHours||Array.from({length:24},(_,i)=>i); // default all on
+  let html='<div class="hour-grid-controls">';
+  html+=`<button class="btn btn-sm" onclick="setAllHours('${containerId}',true)">ALL ON</button>`;
+  html+=`<button class="btn btn-sm" onclick="setAllHours('${containerId}',false)">ALL OFF</button>`;
+  html+=`<button class="btn btn-sm" onclick="setPrimeTime('${containerId}')">PRIME TIME</button>`;
+  html+='</div><div class="hour-grid">';
+  for(let h=0;h<24;h++){
+    const label=h===0?'12 AM':h<12?h+' AM':h===12?'12 PM':(h-12)+' PM';
+    const active=hours.includes(h)?'active':'';
+    html+=`<div class="hour-chip ${active}" data-hour="${h}" onclick="toggleHour(this,'${containerId}')">${label}</div>`;
+  }
+  html+='</div>';
+  el.innerHTML=html;
+}
+function toggleHour(el, containerId){ el.classList.toggle('active'); }
+function setAllHours(containerId, on){
+  document.querySelectorAll(`#${containerId} .hour-chip`).forEach(c=>c.classList.toggle('active',on));
+}
+function setPrimeTime(containerId){
+  document.querySelectorAll(`#${containerId} .hour-chip`).forEach(c=>{
+    const h=parseInt(c.dataset.hour);
+    c.classList.toggle('active', h>=18&&h<=23);
+  });
+}
+function getCheckedHours(containerId){
+  const chips=document.querySelectorAll(`#${containerId} .hour-chip`);
+  if(!chips.length) return []; // not rendered = all hours
+  const checked=[...chips].filter(c=>c.classList.contains('active')).map(c=>parseInt(c.dataset.hour));
+  return checked.length===24?[]:checked; // empty = all 24h
+}
+
+// ══════════════════════════════════════════
+// SCHEDULE STATUS PANEL
+// ══════════════════════════════════════════
+function renderScheduleStatus(){
+  const offsets=getManagedWeekOffsets(); // [0,1]
+  for(let i=0;i<offsets.length;i++){
+    const wo=offsets[i];
+    const cardNum=i+1; // card IDs are 1-based
+    const wStart=getWeekStart(wo);
+    const wEnd=new Date(wStart); wEnd.setDate(wEnd.getDate()+6);
+    const fmt=d=>d.toLocaleDateString('en-US',{month:'short',day:'numeric'});
+    const datesEl=document.getElementById('wk-dates-'+cardNum);
+    const statusEl=document.getElementById('wk-status-'+cardNum);
+    const card=document.getElementById('week-card-'+cardNum);
+    if(!datesEl) continue;
+    datesEl.textContent=`${fmt(wStart)} – ${fmt(wEnd)}`;
+    const built=S.channels.length&&S.channels.some(ch=>S.guide[getWeekKey(ch.id,wo)]?.length>0);
+    card.classList.toggle('built',built);
+    statusEl.textContent=built?'✓ BUILT':'NOT BUILT';
+  }
+  // Hide week cards 3+4 since we only use 2 weeks
+  [3,4].forEach(n=>{const c=document.getElementById('week-card-'+n);if(c)c.style.display='none';});
+}
+
+// ══════════════════════════════════════════
+// CHANNEL EDIT
+// ══════════════════════════════════════════
+function editChannel(id){
+  const ch=S.channels.find(c=>c.id===id); if(!ch) return;
+  // Show the edit tab
+  const trigger=document.getElementById('tab-edit-trigger');
+  trigger.style.display='';
+  trigger.click();
+
+  // Build the edit form dynamically (same layout as add form)
+  const isMovie=ch.type==='movie';
+  const prefix=isMovie?'ed-mv':'ed-tv';
+
+  // Render genre tags HTML
+  const mvGenreList=['Action','Adventure','Animation','Comedy','Crime','Documentary','Drama','Family','Fantasy','Horror','Mystery','Romance','Sci-Fi','Thriller','Western'];
+  const tvGenreList=['Action','Animation','Comedy','Crime','Documentary','Drama','Family','Fantasy','Horror','Mystery','Reality','Sci-Fi','Thriller'];
+  const genreList=isMovie?mvGenreList:tvGenreList;
+  const genreTags=genreList.map(g=>`<div class="filter-tag${(ch.genres||[]).includes(g)?' active':''}" data-val="${g}" onclick="this.classList.toggle('active')">${g}</div>`).join('');
+
+  let form=`<div style="font-size:12px;color:var(--amber);letter-spacing:2px;margin-bottom:12px;">EDITING: CH ${ch.number} — ${ch.name.toUpperCase()}</div>`;
+  form+=`<div class="form-grid">
+    <div class="form-row"><label>Channel Number</label><input id="${prefix}-num" type="number" value="${ch.number}" min="1" max="999"/></div>
+    <div class="form-row"><label>Channel Name</label><input id="${prefix}-name" type="text" value="${ch.name}"/></div>
+  </div>`;
+
+  // Lib tags
+  const libType=isMovie?'movie':'show';
+  const libTags=S.libraries.filter(l=>l.type===libType&&S.selectedLibKeys.includes(l.key)&&!/commercial/i.test(l.title))
+    .map(l=>`<div class="filter-tag${(ch.libKeys||[]).includes(l.key)?' active':''}" data-key="${l.key}" onclick="this.classList.toggle('active')">${l.title}</div>`).join('');
+  form+=`<div class="form-row"><label>Source Libraries</label><div id="${prefix}-lib-tags" class="filter-tags">${libTags||'<span class="hint">No libraries</span>'}</div></div>`;
+
+  // Collection picker — show movie collections for movie channels, TV for TV channels
+  const editCollections=isMovie?(S.mvCollections||[]):(S.tvCollections||[]);
+  const collectionTags=editCollections.length
+    ? editCollections.map(c=>`<div class="filter-tag${ch.collectionKey===c.ratingKey?' active':''}" data-key="${c.ratingKey}" onclick="selectSingle(this)">${c.title}</div>`).join('')
+    : '<span class="hint">No collections found — connect to Plex to load</span>';
+  const collHint=isMovie?'optional — uses collection order, ignores sort/genre':'optional — filters to shows in this collection';
+  form+=`<div class="form-row"><label>Collection <span class="hint" style="display:inline;">(${collHint})</span></label><div id="${prefix}-collection-tags" class="filter-tags">${collectionTags}</div></div>`;
+
+  form+=`<div class="form-row"><label>Genre Filter</label><div id="${prefix}-genre-tags" class="filter-tags">${genreTags}</div></div>`;
+
+  // Decade + Rating
+  const decades=['','1950','1960','1970','1980','1990','2000','2010','2020'];
+  const decOpts=decades.map(d=>`<option value="${d}"${ch.decade===d?' selected':''}>${d?d+'s':'Any'}</option>`).join('');
+  const mvRatings=['','G','PG','PG-13','R','NC-17'];
+  const tvRatings=['','TV-Y','TV-G','TV-PG','TV-14','TV-MA'];
+  const ratingList=isMovie?mvRatings:tvRatings;
+  const ratingOpts=ratingList.map(r=>`<option value="${r}"${ch.maxRating===r?' selected':''}>${r||'Any Rating'}</option>`).join('');
+  form+=`<div class="form-grid">
+    <div class="form-row"><label>Decade</label><select id="${prefix}-decade">${decOpts}</select></div>
+    <div class="form-row"><label>Max Content Rating</label><select id="${prefix}-max-rating">${ratingOpts}</select></div>
+  </div>`;
+
+  if(isMovie){
+    const sortOpts=[['random','Random Shuffle'],['rating','Highest Rated'],['year','Newest First'],['year_asc','Oldest First'],['title','Alphabetical']];
+    const sortSel=sortOpts.map(([v,l])=>`<option value="${v}"${ch.sort===v?' selected':''}>${l}</option>`).join('');
+    form+=`<div class="form-grid">
+      <div class="form-row"><label>Sort Order</label><select id="${prefix}-sort">${sortSel}</select></div>
+      <div class="form-row"><label>Max Movies (0=all)</label><input id="${prefix}-max" type="number" value="${ch.maxItems||0}"/></div>
+    </div>`;
+  } else {
+    const ordOpts=[['sequential','Sequential'],['random','Random Shuffle']];
+    const ordSel=ordOpts.map(([v,l])=>`<option value="${v}"${ch.order===v?' selected':''}>${l}</option>`).join('');
+    form+=`<div class="form-grid">
+      <div class="form-row"><label>Episode Order</label><select id="${prefix}-order">${ordSel}</select></div>
+      <div class="form-row"><label>Max Episodes (0=all)</label><input id="${prefix}-max" type="number" value="${ch.maxItems||0}"/></div>
+    </div>`;
+  }
+
+  // Broadcast hours
+  form+=`<div class="section-title">BROADCAST HOURS</div>
+  <div class="form-row"><label>On-Air Hours</label><div id="${prefix}-broadcast-hours"></div></div>`;
+
+  // Off-air lib
+  const allLibTags=S.libraries.filter(l=>S.selectedLibKeys.includes(l.key))
+    .map(l=>`<div class="filter-tag${ch.offairLibKey===l.key?' active':''}" data-key="${l.key}" onclick="document.querySelectorAll('#${prefix}-offair-lib-tags .filter-tag').forEach(x=>x.classList.remove('active'));this.classList.add('active')">${l.title}</div>`).join('');
+  form+=`<div class="form-row"><label>Off-Air Library</label><div id="${prefix}-offair-lib-tags" class="filter-tags">${allLibTags||'<span class="hint">None</span>'}</div></div>`;
+
+  // PSA (TV only)
+  if(!isMovie){
+    const psaMode=ch.psa?.mode||'none';
+    const psaLibTags=S.libraries.filter(l=>S.selectedLibKeys.includes(l.key))
+      .map(l=>`<div class="filter-tag${ch.psa?.libKey===l.key?' active':''}" data-key="${l.key}" onclick="document.querySelectorAll('#${prefix}-psa-lib-tags .filter-tag').forEach(x=>x.classList.remove('active'));this.classList.add('active')">${l.title}</div>`).join('');
+    form+=`<div class="section-title">SPECIAL PROGRAMMING</div>
+    <div class="form-grid">
+      <div class="form-row"><label>10 PM PSA Slot</label>
+        <select id="${prefix}-psa-mode">
+          <option value="none"${psaMode==='none'?' selected':''}>Disabled</option>
+          <option value="enabled"${psaMode==='enabled'?' selected':''}>Enabled</option>
+        </select>
+      </div>
+      <div class="form-row"><label>PSA Library</label><div id="${prefix}-psa-lib-tags" class="filter-tags">${psaLibTags}</div></div>
+    </div>`;
+  }
+
+  // Commercials
+  const comm=ch.commercials||{};
+  const commMode=comm.mode||'none';
+  const commLibTags=S.libraries.filter(l=>l.type==='movie'&&/commercial/i.test(l.title)&&S.selectedLibKeys.includes(l.key))
+    .map(l=>`<div class="filter-tag${comm.libKey===l.key?' active':''}" data-key="${l.key}" onclick="this.classList.toggle('active')">${l.title}</div>`).join('');
+  const commOpts=[['none','Disabled'],['between',isMovie?'Between Each Movie':'Between Each Episode'],['count',isMovie?'Every X Movies':'Every X Episodes']];
+  const commSel=commOpts.map(([v,l])=>`<option value="${v}"${commMode===v?' selected':''}>${l}</option>`).join('');
+  const showInterval=commMode==='count'?'':'display:none;';
+  form+=`<div class="section-title">COMMERCIALS</div>
+  <div class="form-grid">
+    <div class="form-row"><label>Commercials Library</label><div id="${prefix}-comm-lib-tags" class="filter-tags">${commLibTags||'<span class="hint">None found</span>'}</div></div>
+    <div class="form-row"><label>Insert Commercials</label>
+      <select id="${prefix}-comm-mode" onchange="document.getElementById('${prefix}-comm-interval-row').style.display=this.value==='count'?'':'none';document.getElementById('${prefix}-comm-dur-row').style.display=this.value!=='none'?'':'none';">${commSel}</select>
+    </div>
+  </div>
+  <div id="${prefix}-comm-interval-row" style="${showInterval}"><label class="form-row"><span style="font-size:10px;color:var(--amber);letter-spacing:2px;">EVERY X ${isMovie?'MOVIES':'EPISODES'}</span><input id="${prefix}-comm-interval" type="number" value="${comm.interval||1}" min="1" max="20"/></label></div>
+  <div id="${prefix}-comm-dur-row" style="${commMode==='none'?'display:none;':''}"><label class="form-row"><span style="font-size:10px;color:var(--amber);letter-spacing:2px;">SPOTS PER BREAK</span><input id="${prefix}-comm-duration" type="number" value="${comm.breakCount||2}" min="1" max="10"/></label></div>`;
+
+  form+=`<div style="display:flex;justify-content:flex-end;gap:8px;margin-top:14px;">
+    <button class="btn" onclick="cancelEdit()">CANCEL</button>
+    <button class="btn cyan" onclick="requirePin('saveEdit:${ch.id}')">✓ SAVE CHANGES</button>
+  </div>`;
+
+  document.getElementById('edit-form-container').innerHTML=form;
+  // Render hour grid after inserting into DOM
+  renderHourGrid(`${prefix}-broadcast-hours`, ch.broadcastHours&&ch.broadcastHours.length?ch.broadcastHours:Array.from({length:24},(_,i)=>i));
+}
+
+function cancelEdit(){
+  document.getElementById('tab-edit-trigger').style.display='none';
+  document.querySelector('[data-panel="tab-channels"]').click();
+}
+
+function saveEditChannel(id){
+  const ch=S.channels.find(c=>c.id===id); if(!ch) return;
+  const isMovie=ch.type==='movie';
+  const prefix=isMovie?'ed-mv':'ed-tv';
+
+  const newNum=parseInt(document.getElementById(`${prefix}-num`).value);
+  const conflict=S.channels.find(c=>c.number===newNum&&c.id!==id);
+  if(conflict){showToast('CHANNEL NUMBER ALREADY IN USE');return;}
+
+  const libKeys=[...document.querySelectorAll(`#${prefix}-lib-tags .filter-tag.active`)].map(t=>t.dataset.key);
+  const genres=[...document.querySelectorAll(`#${prefix}-genre-tags .filter-tag.active`)].map(t=>t.dataset.val);
+  const collectionKey=document.querySelector(`#${prefix}-collection-tags .filter-tag.active`)?.dataset.key||null;
+  const commMode=document.getElementById(`${prefix}-comm-mode`).value;
+  const commLibKey=document.querySelector(`#${prefix}-comm-lib-tags .filter-tag.active`)?.dataset.key||null;
+  const offairLibKey=document.querySelector(`#${prefix}-offair-lib-tags .filter-tag.active`)?.dataset.key||null;
+  const broadcastHours=getCheckedHours(`${prefix}-broadcast-hours`);
+
+  const updated={...ch,
+    number:newNum,
+    name:document.getElementById(`${prefix}-name`).value.trim(),
+    libKeys, genres, collectionKey,
+    decade:document.getElementById(`${prefix}-decade`).value,
+    maxRating:document.getElementById(`${prefix}-max-rating`).value||null,
+    maxItems:parseInt(document.getElementById(`${prefix}-max`).value)||0,
+    broadcastHours, offairLibKey,
+    commercials:{mode:commMode,libKey:commLibKey,
+      interval:parseInt(document.getElementById(`${prefix}-comm-interval`).value)||1,
+      breakCount:parseInt(document.getElementById(`${prefix}-comm-duration`).value)||2},
+  };
+  if(isMovie) updated.sort=document.getElementById(`${prefix}-sort`).value;
+  else {
+    updated.order=document.getElementById(`${prefix}-order`).value;
+    const psaMode=document.getElementById(`${prefix}-psa-mode`).value;
+    const psaLibKey=document.querySelector(`#${prefix}-psa-lib-tags .filter-tag.active`)?.dataset.key||null;
+    updated.psa={mode:psaMode,libKey:psaLibKey};
+  }
+
+  const idx=S.channels.findIndex(c=>c.id===id);
+  S.channels[idx]=updated;
+  S.channels.sort((a,b)=>a.number-b.number);
+  persistChannels();
+  renderChannelsList();
+  cancelEdit();
+  showToast(`CH ${newNum} UPDATED — REBUILD SCHEDULE TO APPLY`);
+}
+
+// ══════════════════════════════════════════
+// UPDATED renderLibFilterTags — adds offair/psa
+// ══════════════════════════════════════════
+function renderAllLibTags(){
+  renderLibFilterTags();
+  // Off-air lib tags (all libraries)
+  const allLibs=S.libraries.filter(l=>S.selectedLibKeys.includes(l.key));
+  const allHtml=allLibs.length
+    ? allLibs.map(l=>`<div class="filter-tag" data-key="${l.key}" onclick="selectSingle(this)">${l.title}</div>`).join('')
+    : '<span class="hint">Connect to Plex first</span>';
+  ['mv-offair-lib-tags','tv-offair-lib-tags','tv-psa-lib-tags'].forEach(id=>{
+    const el=document.getElementById(id); if(el) el.innerHTML=allHtml;
+  });
+
+  // Marathon TV label tags
+  const mtvLabelEl=document.getElementById('mtv-label-tags');
+  if(mtvLabelEl){
+    const tvLabelArr=[...S.tvLabels||[]];
+    mtvLabelEl.innerHTML=tvLabelArr.length
+      ? tvLabelArr.map(l=>`<div class="filter-tag" data-val="${l}" onclick="this.classList.toggle('active')">${l}</div>`).join('')
+      : '<span class="hint">No labels found</span>';
+  }
+
+  // Render hour grids
+  renderHourGrid('mv-broadcast-hours', Array.from({length:24},(_,i)=>i));
+  renderHourGrid('tv-broadcast-hours', Array.from({length:24},(_,i)=>i));
+}
+function selectSingle(el){ 
+  el.closest('.filter-tags').querySelectorAll('.filter-tag').forEach(t=>t.classList.remove('active'));
+  el.classList.add('active');
+}
+
+
+
+// ── core helper (defined early) ──
+function loadFavorites(arr){ S.favorites=new Set(arr||[]); }
+
+// ── Favorites ──
+function toggleFav(chId,starEl,lblEl){
+  if(S.favorites.has(chId)){ S.favorites.delete(chId); starEl?.classList.remove('active'); lblEl?.classList.remove('fav-lit'); }
+  else { S.favorites.add(chId); starEl?.classList.add('active'); lblEl?.classList.add('fav-lit'); }
+  persistFavorites();
+  if(S.favFilterActive) renderGuide();
+}
+function toggleFavFilter(){
+  S.favFilterActive=!S.favFilterActive;
+  document.getElementById('btn-favs').classList.toggle('active',S.favFilterActive);
+  renderGuide();
+}
+function toggleScanlines(){
+  const off = document.body.classList.toggle('no-scanlines');
+  localStorage.setItem('retrocast-scanlines', off ? 'off' : 'on');
+  document.getElementById('btn-scanlines').classList.toggle('active', !off);
+}
+
+async function persistFavorites(){
+  const arr=Array.from(S.favorites);
+  try{ await apiPost('/api/config',{favorites:arr}); }catch(e){}
+  const sv=JSON.parse(localStorage.getItem('retrocast')||'{}');
+  localStorage.setItem('retrocast',JSON.stringify({...sv,favorites:arr}));
+}
+
+// ── PiP helpers ──
+function _populatePipInfo(ch,prog){
+  ch=ch||S.currentChannel; prog=prog||S.currentProgram;
+  const bug=document.getElementById('pip-channel-bug');
+  if(bug) bug.textContent=(ch?.icon?ch.icon+' ':'')+' CH '+(ch?.number||'');
+  const t=document.getElementById('pip-now-title');
+  if(t) t.textContent=prog?.title||'';
+  const m=document.getElementById('pip-now-meta');
+  if(m&&prog){
+    const b=[];
+    if(prog.rating) b.push('<span>★ '+Number(prog.rating).toFixed(1)+'</span>');
+    if(prog.contentRating) b.push('<span>'+prog.contentRating+'</span>');
+    if(prog.itemType==='tv'&&prog.season!=null) b.push('<span>S'+String(prog.season).padStart(2,'0')+'E'+String(prog.episode||0).padStart(2,'0')+'</span>');
+    if(prog.year) b.push('<span>'+prog.year+'</span>');
+    if(prog.duration) b.push('<span>'+formatDuration(prog.duration)+'</span>');
+    m.innerHTML=b.join('');
+  }
+}
+
+function enterPip(){
+  if(!pendingPlayback) return;
+  const _fs=document.getElementById('player-fullscreen');
+  _fs.classList.add('pip-mode');
+  _fs.classList.remove('pip-loading-active');
+  const pw=document.getElementById('pip-window'); pw.style.display=''; pw.classList.add('active');
+  document.body.classList.add('pip-active');
+  _stopIdleWatcher();
+  document.getElementById('fs-static-overlay').classList.add('hidden'); stopStaticNoise();
+  S.pipActive=true;
+  _populatePipInfo(pendingPlayback.ch || S.currentChannel, pendingPlayback.prog || S.currentProgram);
+  document.getElementById('video-player').onclick = function(){ tuneToProgram(S.currentChannel, S.currentProgram, false); };
+}
+
+function expandFromPip(){
+  if(!S.pipActive) return;
+  const fs=document.getElementById('player-fullscreen');
+  fs.classList.remove('pip-mode'); fs.classList.remove('ui-hidden');
+  const pw=document.getElementById('pip-window'); pw.classList.remove('active'); pw.style.display='none';
+  document.body.classList.remove('pip-active');
+  S.pipActive=false;
+  document.getElementById('video-player').onclick = null;
+  _startIdleWatcher();
+}
+
+function leavePip(keepBodyClass=false){
+  if(!S.pipActive) return;
+  if(!keepBodyClass){
+    // Full exit: remove pip-mode, hide pip-window
+    document.getElementById('player-fullscreen').classList.remove('pip-mode');
+    const pw=document.getElementById('pip-window'); pw.classList.remove('active'); pw.style.display='none';
+    document.body.classList.remove('pip-active');
+    document.getElementById('video-player').onclick = null;
+  }
+  // When keepBodyClass=true (pip channel change): keep pip-mode and pip-window visible,
+  // just mark as inactive so startPlayback knows state
+  S.pipActive=false;
+}
+
+function stopPip(){
+  document.getElementById('player-fullscreen').classList.remove('pip-mode');
+  const pw=document.getElementById('pip-window'); pw.classList.remove('active'); pw.style.display='none';
+  document.body.classList.remove('pip-active');
+  S.pipActive=false;
+  exitPlayer();
+}
+
+function pipChannelStep(dir){
+  if(!S.channels.length) return;
+  const sorted=[...S.channels].sort((a,b)=>a.number-b.number);
+  let idx=sorted.findIndex(c=>c.id===S.currentChannel?.id);
+  idx=(idx+dir+sorted.length)%sorted.length;
+  tuneToChannel(sorted[idx],true);
+}
+
+
+
+// ── TV Static Noise ──
+let _staticRaf = null;
+function startStaticNoise(){
+  stopStaticNoise();
+  const canvas = document.getElementById('fs-static-noise');
+  if(!canvas) return;
+  const ctx = canvas.getContext('2d');
+  // Use parent dimensions since canvas may have no layout yet
+  const parent = canvas.parentElement;
+  canvas.width  = parent ? parent.offsetWidth  || window.innerWidth  : window.innerWidth;
+  canvas.height = parent ? parent.offsetHeight || window.innerHeight : window.innerHeight;
+  function drawFrame(){
+    const w=canvas.width, h=canvas.height;
+    const img=ctx.createImageData(w,h);
+    const d=img.data;
+    for(let i=0;i<d.length;i+=4){
+      const v=Math.random()*255|0;
+      d[i]  =v>180?v-20:v;
+      d[i+1]=v>180?v-20:v;
+      d[i+2]=v>180?Math.min(255,v+15):v;
+      d[i+3]=255;
+    }
+    ctx.putImageData(img,0,0);
+    _staticRaf=requestAnimationFrame(drawFrame);
+  }
+  drawFrame();
+}
+function stopStaticNoise(){
+  if(_staticRaf){ cancelAnimationFrame(_staticRaf); _staticRaf=null; }
+}
+</script>
+
+<div id="pip-window">
+  <div id="pip-info-panel">
+    <div id="pip-channel-bug"></div>
+    <div id="pip-now-label">NOW PLAYING</div>
+    <div id="pip-now-title"></div>
+    <div id="pip-now-meta"></div>
+  </div>
+  <div id="pip-controls">
+    <button id="pip-prev-btn" onclick="pipChannelStep(-1)">▲</button>
+    <button id="pip-stop-btn" onclick="stopPip()">■ CLOSE PiP</button>
+    <button id="pip-next-btn" onclick="pipChannelStep(1)">▼</button>
+  </div>
+</div>
+
+<!-- THEME PICKER -->
+<div id="theme-popup" style="display:none;position:fixed;top:52px;right:100px;background:#0f0f1a;border:2px solid var(--amber);box-shadow:0 0 20px rgba(255,176,0,0.2),0 4px 20px rgba(0,0,0,0.8);z-index:900;padding:12px;font-family:'Share Tech Mono',monospace;min-width:180px;">
+  <div style="font-family:'VT323',monospace;font-size:18px;color:var(--amber);letter-spacing:2px;margin-bottom:10px;text-align:center;">◈ THEME</div>
+  <div class="theme-option active" data-theme="" onclick="setTheme('')" style="display:flex;align-items:center;gap:10px;padding:7px 10px;cursor:pointer;border:1px solid transparent;font-size:12px;color:#d0d0e8;letter-spacing:1px;">
+    <div style="width:14px;height:14px;border-radius:2px;background:#ffb000;border:1px solid rgba(255,255,255,0.2);"></div>AMBER
+  </div>
+  <div class="theme-option" data-theme="green" onclick="setTheme('green')" style="display:flex;align-items:center;gap:10px;padding:7px 10px;cursor:pointer;border:1px solid transparent;font-size:12px;color:#d0d0e8;letter-spacing:1px;">
+    <div style="width:14px;height:14px;border-radius:2px;background:#00ff41;border:1px solid rgba(255,255,255,0.2);"></div>GREEN PHOSPHOR
+  </div>
+  <div class="theme-option" data-theme="blue" onclick="setTheme('blue')" style="display:flex;align-items:center;gap:10px;padding:7px 10px;cursor:pointer;border:1px solid transparent;font-size:12px;color:#d0d0e8;letter-spacing:1px;">
+    <div style="width:14px;height:14px;border-radius:2px;background:#00b4ff;border:1px solid rgba(255,255,255,0.2);"></div>BLUE/CYAN
+  </div>
+  <div class="theme-option" data-theme="white" onclick="setTheme('white')" style="display:flex;align-items:center;gap:10px;padding:7px 10px;cursor:pointer;border:1px solid transparent;font-size:12px;color:#d0d0e8;letter-spacing:1px;">
+    <div style="width:14px;height:14px;border-radius:2px;background:#e8e8e8;border:1px solid rgba(255,255,255,0.2);"></div>WHITE/GREY
+  </div>
+  <div class="theme-option" data-theme="red" onclick="setTheme('red')" style="display:flex;align-items:center;gap:10px;padding:7px 10px;cursor:pointer;border:1px solid transparent;font-size:12px;color:#d0d0e8;letter-spacing:1px;">
+    <div style="width:14px;height:14px;border-radius:2px;background:#ff2244;border:1px solid rgba(255,255,255,0.2);"></div>RED ALERT
+  </div>
+</div>
+
+</body>
+</html>

@@ -1,0 +1,8 @@
+node_modules
+npm-debug.log
+retrocast-data.json
+*.bat
+*.md
+.git
+.github
+.gitignore
